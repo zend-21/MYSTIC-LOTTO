@@ -2,6 +2,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, signInAnonymously } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getDatabase } from "firebase/database";
 
 // 파이어베이스 전용 API 키 (Gemini API 키와 별개)
 const firebaseConfig = {
@@ -11,12 +12,14 @@ const firebaseConfig = {
   storageBucket: "mystic-lotto.firebasestorage.app",
   messagingSenderId: "697455331590",
   appId: "1:697455331590:web:e9549aa13fa867f6047687",
-  measurementId: "G-VEER5M5JZC"
+  measurementId: "G-VEER5M5JZC",
+  databaseURL: "https://mystic-lotto-default-rtdb.asia-southeast1.firebasedatabase.app"
 };
 
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const rtdb = getDatabase(app);
 export const googleProvider = new GoogleAuthProvider();
 
 export const loginWithGoogle = async () => {

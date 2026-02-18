@@ -15,3 +15,11 @@ export const getFixedDestinyNumbers = async (profile: UserProfile): Promise<Fixe
   const result = await fn(profile);
   return result.data;
 };
+
+export const spendPoints = async (amount: number, reason: string): Promise<void> => {
+  const fn = httpsCallable<{ amount: number; reason: string }, { success: boolean }>(
+    functions,
+    "spendPoints"
+  );
+  await fn({ amount, reason });
+};

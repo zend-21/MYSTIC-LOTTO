@@ -12,6 +12,7 @@ interface UserProfilePageProps {
   onWithdraw: () => void;
   onBack: () => void;
   onToast: (m: string) => void;
+  isAdmin?: boolean;
 }
 
 interface CitySuggestion {
@@ -20,7 +21,7 @@ interface CitySuggestion {
   lon: number;
 }
 
-const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archives, onUpdateProfile, onUpdateOrb, onWithdraw, onBack, onToast }) => {
+const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archives, onUpdateProfile, onUpdateOrb, onWithdraw, onBack, onToast, isAdmin }) => {
   const [activeTab, setActiveTab] = useState<'identity' | 'treasury' | 'social' | 'sanctum'>('identity');
   
   // 닉네임 수정 상태 (상시 노출)
@@ -94,8 +95,22 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
     if (!editNickname.trim()) return;
     setIsCheckingNick(true);
     setTimeout(() => {
-      const forbidden = ['admin', '운영자', '관리자', 'system'];
-      const isValid = !forbidden.includes(editNickname.toLowerCase()) && editNickname.length >= 2;
+      const forbidden = [
+        // 관리/운영
+        'admin', 'system', '운영자', '관리자', '최고관리자', '부관리자', '운영팀', '개발자', '공식', '공식계정',
+        // 신비/직함
+        '점성술사', '미스틱가이드', '마스터', '그랜드마스터', '대현자', '연금술사', '방위술사', '행정술사',
+        '타로상담사', '타로이스트', '타로마스터', '타로리더',
+        '예언자', '신탁자', '점술사', '대사제', '신관', '현자', '마법사', '오라클', '미스틱', '포춘',
+        // 신격/종교 사칭
+        '신', '하느님', '부처', '붓다', '하나님',
+        // AI 사칭
+        'ai', 'chatgpt', '클로드', '제미나이', 'gemini', 'claude', '봇', 'bot',
+      ];
+      // 공백 제거 후 비교 (예: "타로 마스터" → "타로마스터")
+      const normalized = editNickname.toLowerCase().replace(/\s/g, '');
+      const isForbidden = forbidden.some(f => normalized.includes(f));
+      const isValid = (isAdmin || !isForbidden) && editNickname.length >= 2 && editNickname.length < 10;
       setIsNickValid(isValid);
       setIsCheckingNick(false);
       if (isValid) onToast("사용 가능한 신성한 칭호입니다.");
@@ -229,6 +244,23 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                    </div>
 
                    <div className="glass p-10 rounded-[3rem] border border-white/5 space-y-12 shadow-2xl">
+                      {/* 고유 아이디 (읽기 전용) */}
+                      {orb.uniqueTag && (
+                        <div className="space-y-3">
+                          <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest px-1">Unique ID (고유 식별자)</label>
+                          <div className="flex items-center justify-between bg-slate-950/70 border border-slate-800 rounded-2xl px-5 py-4">
+                            <span className="font-mono text-lg font-black text-white tracking-widest">{orb.uniqueTag}</span>
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(orb.uniqueTag || '');
+                                onToast("고유 ID가 복사되었습니다.");
+                              }}
+                              className="text-[9px] font-black text-indigo-400 uppercase tracking-widest border border-indigo-500/30 rounded-lg px-2 py-1 hover:bg-indigo-500/10 transition-colors active:scale-95"
+                            >복사</button>
+                          </div>
+                        </div>
+                      )}
+
                       {/* 상시 노출 섹션: 닉네임 */}
                       <div className="space-y-4">
                         <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest px-1">Sacred Nickname (칭호/닉네임)</label>
@@ -236,14 +268,19 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                            <div className="relative flex-1">
                               <input 
                                 type="text" 
-                                value={editNickname} 
-                                onChange={e => { setEditNickname(e.target.value); setIsNickValid(null); }} 
-                                className={`w-full bg-slate-950/50 border rounded-2xl p-4 text-white font-bold outline-none transition-all ${isNickValid === true ? 'border-emerald-500/50' : isNickValid === false ? 'border-rose-500/50' : 'border-slate-800 focus:border-indigo-500'}`} 
-                                placeholder="활동용 닉네임" 
+                                value={editNickname}
+                                onChange={e => { if (e.target.value.length < 10) { setEditNickname(e.target.value); setIsNickValid(null); } }}
+                                maxLength={9}
+                                className={`w-full bg-slate-950/50 border rounded-2xl p-4 text-white font-bold outline-none transition-all ${isNickValid === true ? 'border-emerald-500/50' : isNickValid === false ? 'border-rose-500/50' : 'border-slate-800 focus:border-indigo-500'}`}
+                                placeholder="닉네임 (2~9자)"
                               />
-                              {isCheckingNick && (
+                              {isCheckingNick ? (
                                 <div className="absolute right-4 top-1/2 -translate-y-1/2">
                                   <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                                </div>
+                              ) : (
+                                <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                                  <span className={`text-[9px] font-black ${editNickname.length >= 9 ? 'text-rose-400' : 'text-slate-600'}`}>{editNickname.length}/9</span>
                                 </div>
                               )}
                            </div>

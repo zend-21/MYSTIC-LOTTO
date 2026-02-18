@@ -2,10 +2,43 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile, OrbState, ChatRoom, ChatMessage, COST_ROOM_CREATE, BoardPost, BoardComment } from '../types';
 import { OrbVisual } from './FortuneOrb';
+import { spendPoints } from '../services/geminiService';
 
-// Firebase Firestore imports
-import { db, auth } from '../services/firebase';
-import { collection, query, onSnapshot, addDoc, updateDoc, doc, setDoc, deleteDoc, orderBy, limit, serverTimestamp } from "firebase/firestore";
+const SUPER_ADMIN_UID = import.meta.env.VITE_SUPER_ADMIN_UID as string;
+
+const ROOM_ICONS = [
+  // 우주/천체
+  '🌌','🪐','⭐','🌟','💫','✨','🌠','🌙','☀️','🌞','🌛','🌜','🌝','🌑','🌕','☄️','🔭','🛸','🚀','🌍','🌎','🌏','🌒','🌓','🌔','🌖','🌗','🌘',
+  // 자연/날씨
+  '🌊','🌋','🏔️','🌸','🌺','🌻','🌹','🌷','🌿','🍀','🌱','🌲','🌳','🌴','🍁','🍂','🍃','🌾','🌈','⛰️','🗻','🏝️','🏕️','🌬️','❄️','⛄','🌪️','🌫️','🌧️','⛈️','🌤️','🌊','🌙','🍄','🪸','🪨','🌵','🌾',
+  // 동물
+  '🦁','🐯','🐺','🦊','🐻','🐼','🐨','🦋','🦅','🦉','🐉','🦄','🐬','🦭','🐋','🦈','🦜','🦚','🦩','🦢','🕊️','🦤','🦝','🐸','🦎','🐊','🦕','🦖','🐙','🦑','🦞','🦀','🐡','🐠','🐟','🐧','🦭','🐘','🦏','🦛','🦒','🦓','🦌','🐃','🦬','🐂','🐄','🐎','🦙','🐑','🐐','🦘','🦥','🦦','🦡','🐿️','🦔',
+  // 마법/판타지
+  '🔮','🪄','💎','👑','🗡️','🛡️','🧿','🪬','⚗️','🔯','♾️','🌀','🪩','🧲','⚜️','🔱','🏺','🗿','📿','🧬','🪤','🧪','⚙️','🔩','🪙','💰','💍','🪞','🪟','🗝️','🔑',
+  // 불/에너지/원소
+  '🔥','⚡','💥','💠','💧','🫧','💨','🌪️','☁️','🌊','🧊','🌫️','🌬️','☀️','🌙','⭐',
+  // 음식/음료
+  '🍎','🍊','🍋','🍇','🍓','🍒','🍑','🥭','🍍','🥥','🌮','🍕','🍜','🍣','🍦','🧁','🎂','🍫','🍬','🍭','🍵','☕','🧋','🍺','🍷','🥂','🍾','🫖','🍯','🥐','🍩','🍪','🌰','🥜',
+  // 음악/예술
+  '🎸','🎺','🎻','🎹','🥁','🎧','🎵','🎶','🎤','🎨','🖌️','🎭','🎬','🎯','🎲','🎮','🕹️','🃏','🎴','♟️','🧩','🪀','🪁','🎠','🎡','🎢','🎪',
+  // 스포츠/활동
+  '⚽','🏀','🎾','🏐','🏈','🎱','🏓','🏸','🥊','🤺','⛷️','🏄','🧗','🏇','🚴','🤸','🏊','🤽','🚣','🧘','🎽','🥋','🛹','🛷','⛸️',
+  // 탈것/이동
+  '✈️','🚀','🛸','🚂','🚢','🛳️','⛵','🏎️','🚁','🛩️','🚃','🚄','🚅','🚇','🚊','🛺','🏍️','🛵','🚲','🛴','🚡','🚠','🚟',
+  // 건물/장소
+  '🏰','🗼','🗽','⛩️','🕌','🛕','🏯','🎠','🕍','⛪','🏛️','🏟️','🎭','🗺️','🗾','🏔️','🌁','🌃','🌆','🌇','🌉',
+  // 얼굴/캐릭터
+  '😊','😎','🤩','😇','🥳','😈','👾','🤖','👻','💀','🎃','👽','🥸','🤠','🥷','🧙','🧝','🧜','🧚','🧛','🧟','🤡','👹','👺','💩','🙈','🙉','🙊',
+  // 하트/감정
+  '❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','❤️‍🔥','💝','💖','💗','💓','💞','💕','💟','❣️','💔','🫀','💋',
+  // 기호/문양
+  '☮️','☯️','♾️','⚛️','🕉️','✡️','☦️','🌐','🔆','🔅','♻️','⚜️','🔱','📛','🔰','⭕','✅','❎','🔴','🟠','🟡','🟢','🔵','🟣','⚫','⚪','🟤',
+];
+
+// Firebase imports
+import { db, auth, rtdb } from '../services/firebase';
+import { collection, query, onSnapshot, addDoc, updateDoc, doc, setDoc, deleteDoc, orderBy, limit, getDocs, startAfter, QueryDocumentSnapshot } from "firebase/firestore";
+import { ref as rtdbRef, set as rtdbSet, remove as rtdbRemove, onDisconnect, onValue, get as rtdbGet } from 'firebase/database';
 
 interface CelestialSquareProps {
   profile: UserProfile;
@@ -16,13 +49,35 @@ interface CelestialSquareProps {
   onToast: (msg: string) => void;
 }
 
+const MSG_PAGE_SIZE = 50;
+const LIST_PAGE_SIZE = 30;
+
 const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdatePoints, onUpdateFavorites, onBack, onToast }) => {
   const [view, setView] = useState<'lounge' | 'chat' | 'board' | 'post-detail' | 'post-edit'>('lounge');
   const [activeRoom, setActiveRoom] = useState<ChatRoom | null>(null);
+
+  // 방 목록 (실시간 최신 + 이전 페이지)
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
+  const [lastRoomDoc, setLastRoomDoc] = useState<QueryDocumentSnapshot | null>(null);
+  const [olderRooms, setOlderRooms] = useState<ChatRoom[]>([]);
+  const [hasMoreRooms, setHasMoreRooms] = useState(false);
+  const [isLoadingMoreRooms, setIsLoadingMoreRooms] = useState(false);
+
+  // 게시글 (실시간 최신 + 이전 페이지)
   const [posts, setPosts] = useState<BoardPost[]>([]);
+  const [lastPostDoc, setLastPostDoc] = useState<QueryDocumentSnapshot | null>(null);
+  const [olderPosts, setOlderPosts] = useState<BoardPost[]>([]);
+  const [hasMorePosts, setHasMorePosts] = useState(false);
+  const [isLoadingMorePosts, setIsLoadingMorePosts] = useState(false);
+
   const [activePost, setActivePost] = useState<BoardPost | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+
+  // 채팅 메시지 (실시간 최신 + 이전 페이지)
+  const [realtimeMsgs, setRealtimeMsgs] = useState<ChatMessage[]>([]);
+  const [historicalMsgs, setHistoricalMsgs] = useState<ChatMessage[]>([]);
+  const [msgCursor, setMsgCursor] = useState<QueryDocumentSnapshot | null>(null);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [isLoadingMoreMsgs, setIsLoadingMoreMsgs] = useState(false);
   const [inputMsg, setInputMsg] = useState('');
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
   const [newRoomTitle, setNewRoomTitle] = useState('');
@@ -32,7 +87,14 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
   // 행성 관리 메뉴 상태
   const [showRoomMenu, setShowRoomMenu] = useState(false);
   const [showDestroyConfirm, setShowDestroyConfirm] = useState(false);
+  const [showInstantDestroyConfirm, setShowInstantDestroyConfirm] = useState(false);
   const [currentTime, setCurrentTime] = useState(Date.now());
+
+  // 아이콘 선택 상태
+  const [newRoomIcon, setNewRoomIcon] = useState('🪐');
+  // 'create' = 방 생성 중 선택, string = 라운지에서 특정 방 아이콘 변경
+  const [showIconPicker, setShowIconPicker] = useState<'create' | string | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 게시글 작성 폼 상태
   const [editTitle, setEditTitle] = useState('');
@@ -41,16 +103,105 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
   const [editMediaType, setEditMediaType] = useState<'image' | 'video'>('image');
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const currentDisplayName = orb.nickname || profile.name;
+  const currentDisplayName = orb.nickname || orb.uniqueTag || '익명';
+
+  // 표시할 전체 메시지 (이전 페이지 + 실시간)
+  const allMessages = [...historicalMsgs, ...realtimeMsgs];
+
+  const loadMoreMessages = async () => {
+    if (!activeRoom || !msgCursor || isLoadingMoreMsgs) return;
+    setIsLoadingMoreMsgs(true);
+    try {
+      const q = query(
+        collection(db, "square", "rooms", "list", activeRoom.id, "messages"),
+        orderBy("timestamp", "desc"),
+        startAfter(msgCursor),
+        limit(MSG_PAGE_SIZE)
+      );
+      const snap = await getDocs(q);
+      const older = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage)).reverse();
+      setHistoricalMsgs(prev => [...older, ...prev]);
+      setMsgCursor(snap.docs[snap.docs.length - 1] || null);
+      setHasMoreMessages(snap.docs.length === MSG_PAGE_SIZE);
+    } finally {
+      setIsLoadingMoreMsgs(false);
+    }
+  };
+
+  const loadMoreRooms = async () => {
+    if (!lastRoomDoc || isLoadingMoreRooms) return;
+    setIsLoadingMoreRooms(true);
+    try {
+      const q = query(
+        collection(db, "square", "rooms", "list"),
+        orderBy("createdAt", "desc"),
+        startAfter(lastRoomDoc),
+        limit(LIST_PAGE_SIZE)
+      );
+      const snap = await getDocs(q);
+      const more = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatRoom));
+      setOlderRooms(prev => [...prev, ...more]);
+      setLastRoomDoc(snap.docs[snap.docs.length - 1] || null);
+      setHasMoreRooms(snap.docs.length === LIST_PAGE_SIZE);
+    } finally {
+      setIsLoadingMoreRooms(false);
+    }
+  };
+
+  const loadMorePosts = async () => {
+    if (!lastPostDoc || isLoadingMorePosts) return;
+    setIsLoadingMorePosts(true);
+    try {
+      const q = query(
+        collection(db, "square", "board", "posts"),
+        orderBy("createdAt", "desc"),
+        startAfter(lastPostDoc),
+        limit(LIST_PAGE_SIZE)
+      );
+      const snap = await getDocs(q);
+      const more = snap.docs.map(d => ({ id: d.id, ...d.data() } as BoardPost));
+      setOlderPosts(prev => [...prev, ...more]);
+      setLastPostDoc(snap.docs[snap.docs.length - 1] || null);
+      setHasMorePosts(snap.docs.length === LIST_PAGE_SIZE);
+    } finally {
+      setIsLoadingMorePosts(false);
+    }
+  };
 
   // Real-time listener for Rooms (라운지 화면일 때만 구독)
   useEffect(() => {
     if (view !== 'lounge') return;
-    const q = query(collection(db, "square", "rooms", "list"), orderBy("createdAt", "desc"), limit(50));
+    // 라운지 재진입 시 이전 페이지 초기화
+    setOlderRooms([]);
+    setLastRoomDoc(null);
+    const q = query(collection(db, "square", "rooms", "list"), orderBy("createdAt", "desc"), limit(LIST_PAGE_SIZE));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const now = Date.now();
+      const THREE_DAYS = 3 * 24 * 60 * 60 * 1000;
       const allRooms = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ChatRoom));
-      setRooms(allRooms.filter(r => !r.deleteAt || r.deleteAt > now));
+
+      allRooms.forEach(room => {
+        if (room.deleteAt && room.deleteAt <= now) {
+          deleteDoc(doc(db, "square", "rooms", "list", room.id)).catch(() => {});
+          return;
+        }
+        const lastActivity = room.lastEnteredAt ?? room.createdAt;
+        if (!room.deleteAt && (room.participantCount ?? 0) === 0 && lastActivity < now - THREE_DAYS) {
+          deleteDoc(doc(db, "square", "rooms", "list", room.id)).catch(() => {});
+        }
+      });
+
+      const filtered = allRooms.filter(r => {
+        if (r.deleteAt && r.deleteAt <= now) return false;
+        const lastActivity = r.lastEnteredAt ?? r.createdAt;
+        if (!r.deleteAt && (r.participantCount ?? 0) === 0 && lastActivity < now - THREE_DAYS) return false;
+        return true;
+      });
+      setRooms(filtered);
+      // 마지막 doc 저장 (다음 페이지 커서)
+      const lastDoc = snapshot.docs[snapshot.docs.length - 1] || null;
+      setLastRoomDoc(lastDoc);
+      setHasMoreRooms(snapshot.docs.length === LIST_PAGE_SIZE);
     });
     return () => unsubscribe();
   }, [view]);
@@ -64,25 +215,83 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
   // Real-time listener for Posts (게시판/게시글 상세 화면일 때만 구독)
   useEffect(() => {
     if (view !== 'board' && view !== 'post-detail') return;
-    const q = query(collection(db, "square", "board", "posts"), orderBy("createdAt", "desc"), limit(50));
+    // 게시판 재진입 시 이전 페이지 초기화
+    if (view === 'board') {
+      setOlderPosts([]);
+      setLastPostDoc(null);
+    }
+    const q = query(collection(db, "square", "board", "posts"), orderBy("createdAt", "desc"), limit(LIST_PAGE_SIZE));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setPosts(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as BoardPost)));
+      const lastDoc = snapshot.docs[snapshot.docs.length - 1] || null;
+      setLastPostDoc(lastDoc);
+      setHasMorePosts(snapshot.docs.length === LIST_PAGE_SIZE);
     });
     return () => unsubscribe();
   }, [view]);
 
-  // Real-time listener for Messages in Active Room
+  // Real-time listener for Messages in Active Room (최신 MSG_PAGE_SIZE개, desc → 역순 표시)
   useEffect(() => {
     if (!activeRoom) {
-      setMessages([]);
+      setRealtimeMsgs([]);
+      setHistoricalMsgs([]);
+      setMsgCursor(null);
+      setHasMoreMessages(false);
       return;
     }
-    const q = query(collection(db, "square", "rooms", "list", activeRoom.id, "messages"), orderBy("timestamp", "asc"), limit(50));
+    // 방 변경 시 이전 페이지 초기화
+    setHistoricalMsgs([]);
+    setMsgCursor(null);
+    const q = query(
+      collection(db, "square", "rooms", "list", activeRoom.id, "messages"),
+      orderBy("timestamp", "desc"),
+      limit(MSG_PAGE_SIZE)
+    );
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setMessages(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage)));
+      const msgs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage)).reverse();
+      setRealtimeMsgs(msgs);
+      // 마지막 doc(= desc 기준 가장 오래된 메시지) 커서 저장
+      const oldestDoc = snapshot.docs[snapshot.docs.length - 1] || null;
+      setMsgCursor(oldestDoc);
+      setHasMoreMessages(snapshot.docs.length === MSG_PAGE_SIZE);
     });
     return () => unsubscribe();
-  }, [activeRoom]);
+  }, [activeRoom?.id]);
+
+  // 입퇴장 실시간 카운트 — RTDB onDisconnect 방식
+  // 서버가 연결 끊김을 감지해 자동 삭제 (강제종료/네트워크 끊김 모두 대응)
+  useEffect(() => {
+    if (view !== 'chat' || !activeRoom || !auth.currentUser) return;
+    const uid = auth.currentUser.uid;
+    const roomRef = doc(db, "square", "rooms", "list", activeRoom.id);
+    const presenceRef = rtdbRef(rtdb, `presence/${activeRoom.id}/${uid}`);
+    const roomPresenceRef = rtdbRef(rtdb, `presence/${activeRoom.id}`);
+
+    // 입장: RTDB에 presence 기록 + 연결 끊기면 서버가 자동 삭제
+    rtdbSet(presenceRef, true).catch(() => {});
+    onDisconnect(presenceRef).remove();
+    // 마지막 입장 시각 갱신 (3일 미방문 자동 소멸 기준)
+    updateDoc(roomRef, { lastEnteredAt: Date.now() }).catch(() => {});
+
+    // 방의 presence 변화 구독 → 카운트 계산 → Firestore 방 doc 업데이트
+    // onValue는 unsubscribe 함수를 반환 — off()가 아닌 이것으로 해제
+    const unsubPresence = onValue(roomPresenceRef, (snap) => {
+      const count = snap.exists() ? Object.keys(snap.val()).length : 0;
+      updateDoc(roomRef, { participantCount: count }).catch(() => {});
+    });
+
+    return () => {
+      unsubPresence(); // 리스너 올바르게 해제
+      // RTDB에서 삭제 후 정확한 카운트를 Firestore에 직접 반영
+      rtdbRemove(presenceRef)
+        .then(() => rtdbGet(roomPresenceRef))
+        .then((snap) => {
+          const count = snap.exists() ? Object.keys(snap.val() || {}).length : 0;
+          updateDoc(roomRef, { participantCount: count }).catch(() => {});
+        })
+        .catch(() => {});
+    };
+  }, [view, activeRoom?.id]);
 
   // 대화방 정보 실시간 동기화 (소멸 배너 표시용)
   useEffect(() => {
@@ -97,11 +306,12 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
     return () => unsubscribe();
   }, [activeRoom?.id]);
 
+  // 새 메시지(실시간) 도착 시만 하단 스크롤 — 이전 메시지 로드 시 스크롤 안 함
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, activeRoom]);
+  }, [realtimeMsgs, activeRoom]);
 
   const toggleFavorite = (e: React.MouseEvent, roomId: string) => {
     e.stopPropagation();
@@ -125,30 +335,70 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
       onToast("방을 개설할 기운(루멘)이 부족합니다.");
       return;
     }
-    
+
     try {
       const roomData = {
         title: newRoomTitle,
         creatorName: currentDisplayName,
-        creatorId: auth.currentUser.uid, // 보안 식별자
-        participantCount: 1,
+        creatorId: auth.currentUser.uid,
+        participantCount: 0,
         createdAt: Date.now(),
-        isPermanent: true
+        isPermanent: true,
+        icon: newRoomIcon,
       };
       const docRef = await addDoc(collection(db, "square", "rooms", "list"), roomData);
-      onUpdatePoints(-COST_ROOM_CREATE);
+      await spendPoints(COST_ROOM_CREATE, 'room_create');
       setActiveRoom({ id: docRef.id, ...roomData });
       setView('chat');
       setIsCreatingRoom(false);
       setNewRoomTitle('');
+      setNewRoomIcon('🪐');
       onToast(`'${newRoomTitle}' 행성이 탄생했습니다. 영구히 보존됩니다.`);
     } catch (err) {
       onToast("행성 창조에 실패했습니다.");
     }
   };
 
+  // 아이콘 선택 확정
+  const handleSelectIcon = async (icon: string) => {
+    if (showIconPicker === 'create') {
+      setNewRoomIcon(icon);
+      setShowIconPicker(null);
+    } else if (showIconPicker) {
+      // 라운지에서 기존 방 아이콘 변경 (행성주인만)
+      try {
+        const roomRef = doc(db, "square", "rooms", "list", showIconPicker);
+        await updateDoc(roomRef, { icon });
+        setShowIconPicker(null);
+        onToast("행성 아이콘이 변경되었습니다.");
+      } catch {
+        onToast("아이콘 변경에 실패했습니다.");
+      }
+    }
+  };
+
+  // 길게 누르기 핸들러 (라운지 방 카드 아이콘용)
+  const handleIconPressStart = (e: React.MouseEvent | React.TouchEvent, roomId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    longPressTimerRef.current = setTimeout(() => {
+      setShowIconPicker(roomId);
+    }, 600);
+  };
+
+  const handleIconPressEnd = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
   const handleTriggerDeletion = async () => {
-    if (!activeRoom || !auth.currentUser || activeRoom.creatorId !== auth.currentUser.uid) return;
+    if (!activeRoom || !auth.currentUser) return;
+    const uid = auth.currentUser.uid;
+    const isCreator = activeRoom.creatorId === uid;
+    const isAdmin = uid === SUPER_ADMIN_UID;
+    if (!isCreator && !isAdmin) return;
     try {
       const deleteAt = Date.now() + (24 * 60 * 60 * 1000); // 24시간 후
       const roomRef = doc(db, "square", "rooms", "list", activeRoom.id);
@@ -159,7 +409,7 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
         userId: "system",
         userName: "SYSTEM",
         userLevel: 0,
-        message: "창조주에 의해 행성 소멸 의식이 시작되었습니다. 24시간 후 이 행성은 대폭발하여 사라집니다.",
+        message: "행성의 성주에 의해 행성 소멸 의식이 시작되었습니다. 24시간 후 이 행성은 소멸됩니다.",
         timestamp: Date.now()
       });
 
@@ -168,6 +418,27 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
       onToast("행성 소멸 의식이 거행되었습니다.");
     } catch (err) {
       onToast("의식 집행에 실패했습니다.");
+    }
+  };
+
+  const handleInstantDeletion = async () => {
+    if (!activeRoom || !auth.currentUser) return;
+    if (activeRoom.creatorId !== auth.currentUser.uid) return;
+    if (orb.points < 1000) {
+      onToast("루멘이 부족합니다. 즉시 소멸에는 1,000루멘이 필요합니다.");
+      setShowInstantDestroyConfirm(false);
+      return;
+    }
+    try {
+      const roomRef = doc(db, "square", "rooms", "list", activeRoom.id);
+      await deleteDoc(roomRef);
+      await spendPoints(1000, 'instant_destroy');
+      setShowInstantDestroyConfirm(false);
+      setActiveRoom(null);
+      setView('lounge');
+      onToast("행성이 즉시 소멸되었습니다.");
+    } catch (err) {
+      onToast("소멸 의식에 실패했습니다.");
     }
   };
 
@@ -235,18 +506,34 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
       onToast("보유하신 기운이 부족합니다.");
       return;
     }
+    if (!showGiftModal || showGiftModal.userId === 'system' || !auth.currentUser) return;
 
-    onUpdatePoints(-amount);
-    if (activeRoom && showGiftModal) {
-      await addDoc(collection(db, "square", "rooms", "list", activeRoom.id, "messages"), {
-        userId: "system",
-        userName: "SYSTEM",
-        userLevel: 0,
-        message: `${currentDisplayName}님이 ${showGiftModal.userName}님에게 ${amount.toLocaleString()} 루멘을 선물했습니다! ✨`,
+    try {
+      await spendPoints(amount, 'gift_lumen');
+
+      // 받는 사람 inbox에 루멘 기록 → App.tsx 리스너가 반영
+      await addDoc(collection(db, "users", showGiftModal.userId, "inbox"), {
+        amount,
+        fromName: currentDisplayName,
+        fromUid: auth.currentUser.uid,
         timestamp: Date.now()
       });
+
+      // 채팅방 시스템 메시지
+      if (activeRoom) {
+        await addDoc(collection(db, "square", "rooms", "list", activeRoom.id, "messages"), {
+          userId: "system",
+          userName: "SYSTEM",
+          userLevel: 0,
+          message: `${currentDisplayName}님이 ${showGiftModal.userName}님에게 ${amount.toLocaleString()} 루멘을 선물했습니다! ✨`,
+          timestamp: Date.now()
+        });
+      }
+
+      onToast(`${showGiftModal.userName}님에게 ${amount.toLocaleString()} 루멘을 전수했습니다.`);
+    } catch {
+      onToast("선물 전송에 실패했습니다.");
     }
-    onToast(`${showGiftModal?.userName}님에게 ${amount.toLocaleString()} 루멘을 전수했습니다.`);
     setShowGiftModal(null);
     setGiftAmount('100');
   };
@@ -265,6 +552,7 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
     return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일 ${date.getHours()}시 ${date.getMinutes()}분`;
   };
 
+  // 즐겨찾기 우선 정렬 (실시간 방 목록만 정렬, 이전 페이지는 순서 유지)
   const sortedRooms = [...rooms].sort((a, b) => {
     const aFav = (orb.favoriteRoomIds || []).includes(a.id);
     const bFav = (orb.favoriteRoomIds || []).includes(b.id);
@@ -272,6 +560,8 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
     if (!aFav && bFav) return 1;
     return b.createdAt - a.createdAt;
   });
+  const allRoomsDisplay = [...sortedRooms, ...olderRooms];
+  const allPostsDisplay = [...posts, ...olderPosts];
 
   return (
     <div className="fixed inset-0 z-[5000] bg-[#020617] text-slate-200 overflow-hidden flex flex-col animate-dimension-shift">
@@ -310,9 +600,21 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
                     <div className="absolute top-full right-0 mt-3 w-52 bg-slate-900 border border-indigo-500/30 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] z-[200] p-2 animate-in fade-in zoom-in-95 duration-200">
                        <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest px-4 py-2 border-b border-white/5 mb-1">Planet Control</p>
                        <button onClick={() => { onToast("알림 설정이 변경되었습니다."); setShowRoomMenu(false); }} className="w-full text-left p-3 rounded-xl hover:bg-white/5 text-[10px] font-bold text-slate-300 transition-colors flex items-center space-x-2"><span>🛎️</span><span>알림 끄기</span></button>
-                       {activeRoom && auth.currentUser && activeRoom.creatorId === auth.currentUser.uid && !activeRoom.deleteAt && (
-                         <button onClick={() => { setShowDestroyConfirm(true); setShowRoomMenu(false); }} className="w-full text-left p-3 rounded-xl hover:bg-rose-900/40 text-[10px] font-black text-rose-400 transition-colors flex items-center space-x-2 border border-rose-500/10 mt-1"><span>🌋</span><span>행성 소멸 의식</span></button>
-                       )}
+                       {activeRoom && auth.currentUser && (() => {
+                         const uid = auth.currentUser!.uid;
+                         const isAdmin = uid === SUPER_ADMIN_UID;
+                         const isCreator = activeRoom.creatorId === uid;
+                         return (isCreator || isAdmin) ? (
+                           <>
+                             {!activeRoom.deleteAt && (
+                               <button onClick={() => { setShowDestroyConfirm(true); setShowRoomMenu(false); }} className="w-full text-left p-3 rounded-xl hover:bg-rose-900/40 text-[10px] font-black text-rose-400 transition-colors flex items-center space-x-2 border border-rose-500/10 mt-1"><span>🌋</span><span>행성 소멸(24H)</span></button>
+                             )}
+                             {isCreator && (
+                               <button onClick={() => { setShowInstantDestroyConfirm(true); setShowRoomMenu(false); }} className="w-full text-left p-3 rounded-xl hover:bg-orange-900/40 text-[10px] font-black text-orange-400 transition-colors flex items-center space-x-2 border border-orange-500/10 mt-1"><span>⚡</span><span>행성 소멸(즉시) (+1000L)</span></button>
+                             )}
+                           </>
+                         ) : null;
+                       })()}
                     </div>
                   </>
                 )}
@@ -330,13 +632,13 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
               <div className="flex justify-between items-end border-b border-white/5 pb-6">
                 <div className="space-y-1">
                    <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.4em]">Permanent Cosmic Hubs</h3>
-                   <p className="text-[10px] text-indigo-400 italic font-medium">개설된 행성은 창조주가 멸망시키기 전까지 영원히 유지됩니다.</p>
+                   <p className="text-[10px] text-indigo-400 italic font-medium">개설된 행성은 소멸 전까지는 유지됩니다.</p>
                 </div>
                 <button onClick={() => setIsCreatingRoom(true)} className="px-8 py-3.5 bg-indigo-600 text-white font-black rounded-2xl text-[10px] uppercase tracking-widest shadow-xl shadow-indigo-600/20 hover:bg-indigo-500 transition-all active:scale-95">행성 창조하기 (1,000 L)</button>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {sortedRooms.map(room => {
+                {allRoomsDisplay.map(room => {
                   const isFav = (orb.favoriteRoomIds || []).includes(room.id);
                   const isDying = !!room.deleteAt;
                   return (
@@ -350,9 +652,22 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
                       
                       <div className="relative z-10">
                         <div className="flex justify-between items-start mb-4">
-                           <div className={`w-10 h-10 rounded-full bg-white/5 flex items-center justify-center ${isDying ? 'text-rose-500' : 'text-indigo-400'} group-hover:scale-110 transition-transform`}>
-                              {isDying ? <span className="text-lg">🌋</span> : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>}
-                           </div>
+                           {(() => {
+                             const isCreator = auth.currentUser?.uid === room.creatorId;
+                             return (
+                               <div
+                                 className={`w-10 h-10 rounded-full bg-white/5 flex items-center justify-center group-hover:scale-110 transition-transform select-none ${isCreator && !isDying ? 'cursor-pointer active:scale-95' : ''}`}
+                                 onMouseDown={isCreator && !isDying ? (e) => handleIconPressStart(e, room.id) : undefined}
+                                 onMouseUp={isCreator && !isDying ? handleIconPressEnd : undefined}
+                                 onMouseLeave={isCreator && !isDying ? handleIconPressEnd : undefined}
+                                 onTouchStart={isCreator && !isDying ? (e) => handleIconPressStart(e, room.id) : undefined}
+                                 onTouchEnd={isCreator && !isDying ? handleIconPressEnd : undefined}
+                                 title={isCreator && !isDying ? "길게 누르면 아이콘 변경" : undefined}
+                               >
+                                 <span className="text-xl">{isDying ? '🌋' : (room.icon || '⭐')}</span>
+                               </div>
+                             );
+                           })()}
                            {!isDying && (
                              <button onClick={(e) => toggleFavorite(e, room.id)} className={`p-2 rounded-lg transition-colors ${isFav ? 'text-yellow-500' : 'text-slate-600 hover:text-white'}`}>
                                 <svg width="24" height="24" viewBox="0 0 24 24" fill={isFav ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
@@ -360,17 +675,29 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
                            )}
                         </div>
                         <h4 className={`text-xl font-black mb-1 group-hover:text-white transition-colors truncate ${isDying ? 'text-rose-200' : isFav ? 'text-yellow-100' : 'text-slate-300'}`}>{room.title}</h4>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Creator: {room.creatorName}</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">by {room.creatorName}</p>
                         {isDying && <p className="text-[9px] text-rose-500 font-black uppercase mt-2 animate-pulse">Destruction Imminent</p>}
                       </div>
                       <div className="relative z-10 flex justify-between items-center mt-6">
-                        <span className={`text-[10px] font-black ${isDying ? 'text-rose-400' : 'text-emerald-500'} bg-white/5 px-3 py-1 rounded-full uppercase tracking-widest`}>{room.participantCount}명 공명 중</span>
+                        <span className={`text-[10px] font-black ${isDying ? 'text-rose-400' : 'text-emerald-500'} bg-white/5 px-3 py-1 rounded-full uppercase tracking-widest`}>{Math.max(0, room.participantCount ?? 0)}명 공명 중</span>
                         <span className="text-[9px] text-slate-600 font-bold">EST. {new Date(room.createdAt).toLocaleDateString()}</span>
                       </div>
                     </button>
                   );
                 })}
               </div>
+              {/* 더 많은 행성 불러오기 */}
+              {hasMoreRooms && (
+                <div className="flex justify-center pt-4">
+                  <button
+                    onClick={loadMoreRooms}
+                    disabled={isLoadingMoreRooms}
+                    className="px-10 py-4 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black text-slate-400 uppercase tracking-widest hover:bg-white/10 transition-all disabled:opacity-50"
+                  >
+                    {isLoadingMoreRooms ? '탐색 중...' : '더 많은 행성 탐색하기'}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -385,9 +712,9 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
               </div>
 
               <div className="space-y-4">
-                {posts.map(post => (
-                  <button 
-                    key={post.id} 
+                {allPostsDisplay.map(post => (
+                  <button
+                    key={post.id}
                     onClick={() => { setActivePost(post); setView('post-detail'); }}
                     className={`w-full glass p-6 rounded-3xl border text-left flex items-center justify-between group transition-all ${post.isNotice ? 'border-indigo-500/30 bg-indigo-500/5' : 'border-white/5 hover:border-emerald-500/40'}`}
                   >
@@ -414,6 +741,18 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
                   </button>
                 ))}
               </div>
+              {/* 게시글 더 불러오기 */}
+              {hasMorePosts && (
+                <div className="flex justify-center pt-4">
+                  <button
+                    onClick={loadMorePosts}
+                    disabled={isLoadingMorePosts}
+                    className="px-10 py-4 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black text-slate-400 uppercase tracking-widest hover:bg-white/10 transition-all disabled:opacity-50"
+                  >
+                    {isLoadingMorePosts ? '불러오는 중...' : '이전 소식 더 보기'}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -538,7 +877,19 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
             )}
 
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-8 space-y-6 custom-scroll">
-               {messages.map(msg => {
+               {/* 이전 메시지 더 불러오기 */}
+               {hasMoreMessages && (
+                 <div className="flex justify-center pt-2 pb-4">
+                   <button
+                     onClick={loadMoreMessages}
+                     disabled={isLoadingMoreMsgs}
+                     className="px-6 py-2.5 bg-white/5 border border-white/10 rounded-full text-[10px] font-black text-slate-400 uppercase tracking-widest hover:bg-white/10 transition-all disabled:opacity-50"
+                   >
+                     {isLoadingMoreMsgs ? '불러오는 중...' : '이전 메시지 보기'}
+                   </button>
+                 </div>
+               )}
+               {allMessages.map(msg => {
                  const isMe = auth.currentUser && msg.userId === auth.currentUser.uid;
                  const isSystem = msg.userId === 'system';
                  if (isSystem) return <div key={msg.id} className="flex justify-center"><p className="text-[9px] font-black text-indigo-400/60 uppercase tracking-widest px-4 py-1.5 bg-indigo-500/5 rounded-full border border-indigo-500/10">{msg.message}</p></div>;
@@ -592,24 +943,78 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
         </div>
       )}
 
+      {/* 행성 즉시 소멸 확인 모달 */}
+      {showInstantDestroyConfirm && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center px-6">
+           <div className="absolute inset-0 bg-black/90 backdrop-blur-xl" onClick={() => setShowInstantDestroyConfirm(false)}></div>
+           <div className="relative glass p-10 rounded-[3rem] border border-orange-500/30 w-full max-w-sm text-center animate-in zoom-in-95 duration-300">
+              <div className="text-4xl mb-6">⚡</div>
+              <h3 className="text-2xl font-black text-orange-400 mb-2 uppercase tracking-widest">Instant Erase</h3>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-8 italic leading-relaxed">
+                "확인을 누르면 이 행성은 <span className="text-orange-400 font-black">즉시 소멸</span>됩니다.<br/>
+                <span className="text-yellow-400 font-black">1,000 루멘</span>이 소모되며 되돌릴 수 없습니다."
+              </p>
+              <div className="space-y-3">
+                 <button onClick={handleInstantDeletion} className="w-full py-5 bg-orange-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-sm hover:bg-orange-500 transition-all">즉시 소멸 (1,000 L)</button>
+                 <button onClick={() => setShowInstantDestroyConfirm(false)} className="w-full py-4 bg-white/5 text-slate-500 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-white/10">보존하기</button>
+              </div>
+           </div>
+        </div>
+      )}
+
       {/* 방 개설 모달 */}
       {isCreatingRoom && (
         <div className="fixed inset-0 z-[6000] flex items-center justify-center px-6">
           <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setIsCreatingRoom(false)}></div>
-          <div className="relative glass p-10 rounded-[3rem] border border-white/10 w-full max-sm text-center animate-in zoom-in-95 duration-300">
-             <div className="text-4xl mb-6">🪐</div>
+          <div className="relative glass p-10 rounded-[3rem] border border-white/10 w-full max-w-sm text-center animate-in zoom-in-95 duration-300">
              <h3 className="text-2xl font-mystic font-black text-white mb-2 uppercase tracking-widest">Create Planet</h3>
-             <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-8 italic">새로운 영구 대화의 장을 탄생시킵니다.</p>
-             <div className="space-y-6">
-                <input 
-                  type="text" 
+             <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-6 italic">새로운 영구 대화의 장을 탄생시킵니다.</p>
+             <div className="space-y-4">
+                {/* 아이콘 선택 */}
+                <div className="flex items-center justify-center space-x-4">
+                  <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-4xl">{newRoomIcon}</div>
+                  <button
+                    onClick={() => setShowIconPicker('create')}
+                    className="px-5 py-2.5 bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 font-black text-[10px] uppercase tracking-widest rounded-xl hover:bg-indigo-500/30 transition-all"
+                  >아이콘 선택</button>
+                </div>
+                <input
+                  type="text"
                   value={newRoomTitle}
                   onChange={e => setNewRoomTitle(e.target.value)}
-                  placeholder="행성의 이름을 지어주세요" 
-                  className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-white text-center font-bold focus:border-indigo-500 outline-none" 
+                  onKeyDown={e => e.key === 'Enter' && handleCreateRoom()}
+                  placeholder="행성의 이름을 지어주세요"
+                  className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-white text-center font-bold focus:border-indigo-500 outline-none"
                 />
-                <button onClick={handleCreateRoom} className="w-full py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-sm">탄생시키기 (1,000 L)</button>
+                <button onClick={handleCreateRoom} className="w-full py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-sm hover:bg-indigo-500 transition-all">탄생시키기 (1,000 L)</button>
              </div>
+          </div>
+        </div>
+      )}
+
+      {/* 아이콘 피커 모달 */}
+      {showIconPicker !== null && (
+        <div className="fixed inset-0 z-[11000] flex items-end sm:items-center justify-center">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowIconPicker(null)}></div>
+          <div className="relative w-full max-w-lg bg-slate-900 border border-indigo-500/20 rounded-t-[3rem] sm:rounded-[3rem] shadow-2xl animate-in slide-in-from-bottom-full sm:zoom-in-95 duration-300 flex flex-col max-h-[80vh]">
+            <div className="p-6 border-b border-white/5 flex items-center justify-between shrink-0">
+              <div>
+                <h3 className="text-sm font-black text-white uppercase tracking-widest">아이콘 선택</h3>
+                <p className="text-[10px] text-slate-500 font-bold mt-0.5 uppercase tracking-widest">{ROOM_ICONS.length}개의 아이콘</p>
+              </div>
+              <button onClick={() => setShowIconPicker(null)} className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-all text-lg font-black">✕</button>
+            </div>
+            <div className="overflow-y-auto custom-scroll p-4">
+              <div className="grid grid-cols-8 gap-2">
+                {ROOM_ICONS.map((icon, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleSelectIcon(icon)}
+                    className="w-full aspect-square rounded-2xl bg-white/5 hover:bg-indigo-500/30 flex items-center justify-center text-2xl transition-all active:scale-90 hover:scale-110"
+                  >{icon}</button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}

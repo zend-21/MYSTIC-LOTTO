@@ -1,15 +1,52 @@
+import * as admin from "firebase-admin";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
 import { GoogleGenAI, Type } from "@google/genai";
 
+admin.initializeApp();
+const db = admin.firestore();
+
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 
+// ── 포인트 비용 상수 ──────────────────────────────────────────
+const COST_DIVINE = 1000;
+const COST_SCIENCE = 1000;
+const COST_ANNUAL = 50000;
+const ADMIN_UID = "o5XegbLlnPVJhZtn31HXyddBGKW2";
+
+// ── 포인트 차감 헬퍼 (트랜잭션 내부에서 사용) ──────────────────
+async function deductPoints(
+  uid: string,
+  amount: number,
+  tx: FirebaseFirestore.Transaction
+): Promise<void> {
+  if (uid === ADMIN_UID) return; // 최고관리자는 무한 루멘
+  const userRef = db.collection("users").doc(uid);
+  const snap = await tx.get(userRef);
+  if (!snap.exists) throw new HttpsError("not-found", "사용자 데이터를 찾을 수 없습니다.");
+  const currentPoints: number = snap.data()?.orb?.points ?? 0;
+  if (currentPoints < amount) {
+    throw new HttpsError("failed-precondition", "루멘이 부족합니다.");
+  }
+  tx.update(userRef, { "orb.points": admin.firestore.FieldValue.increment(-amount) });
+}
+
 // ──────────────────────────────────────────────
-// 오늘의 운세 + 로또번호
+// 오늘의 운세 + 로또번호 (COST: 1,000 루멘)
 // ──────────────────────────────────────────────
 export const getFortuneAndNumbers = onCall(
   { secrets: [GEMINI_API_KEY], region: "asia-northeast3", timeoutSeconds: 300 },
   async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    const uid = request.auth.uid;
+
+    // ① 포인트 차감 (원자적 트랜잭션)
+    await db.runTransaction(async (tx) => {
+      await deductPoints(uid, COST_DIVINE, tx);
+    });
+
+    // ② AI 호출
     const profile = request.data;
     if (!profile || !profile.name) {
       throw new HttpsError("invalid-argument", "프로필 정보가 필요합니다.");
@@ -119,11 +156,20 @@ export const getFortuneAndNumbers = onCall(
 );
 
 // ──────────────────────────────────────────────
-// 지성 분석 리포트 (20,000회 계산은 클라이언트, Gemini 호출만 서버)
+// 지성 분석 리포트 (COST: 1,000 루멘)
 // ──────────────────────────────────────────────
 export const getScientificReport = onCall(
   { secrets: [GEMINI_API_KEY], region: "asia-northeast3", timeoutSeconds: 60 },
   async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    const uid = request.auth.uid;
+
+    // ① 포인트 차감
+    await db.runTransaction(async (tx) => {
+      await deductPoints(uid, COST_SCIENCE, tx);
+    });
+
+    // ② AI 호출
     const { candidate, metrics, engineLabel, algorithmMode, bradfordSets } = request.data;
 
     if (!candidate || !metrics) {
@@ -173,11 +219,20 @@ export const getScientificReport = onCall(
 );
 
 // ──────────────────────────────────────────────
-// 연간 천명 대운 리포트
+// 연간 천명 대운 리포트 (COST: 50,000 루멘)
 // ──────────────────────────────────────────────
 export const getFixedDestinyNumbers = onCall(
   { secrets: [GEMINI_API_KEY], region: "asia-northeast3", timeoutSeconds: 300 },
   async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    const uid = request.auth.uid;
+
+    // ① 포인트 차감
+    await db.runTransaction(async (tx) => {
+      await deductPoints(uid, COST_ANNUAL, tx);
+    });
+
+    // ② AI 호출
     const profile = request.data;
     if (!profile || !profile.name) {
       throw new HttpsError("invalid-argument", "프로필 정보가 필요합니다.");
@@ -284,5 +339,77 @@ export const getFixedDestinyNumbers = onCall(
     const text = response.text;
     if (!text) throw new HttpsError("internal", "AI 응답이 비어있습니다.");
     return JSON.parse(text);
+  }
+);
+
+// ──────────────────────────────────────────────
+// 범용 포인트 차감 (방 개설, 즉시 소멸, 황금카드, 장식 구매)
+// ──────────────────────────────────────────────
+export const spendPoints = onCall(
+  { region: "asia-northeast3" },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    const uid = request.auth.uid;
+
+    const { amount, reason } = request.data as { amount: number; reason: string };
+
+    if (!amount || typeof amount !== "number" || amount <= 0) {
+      throw new HttpsError("invalid-argument", "유효하지 않은 금액입니다.");
+    }
+    if (!reason || typeof reason !== "string") {
+      throw new HttpsError("invalid-argument", "사용 목적이 필요합니다.");
+    }
+
+    await db.runTransaction(async (tx) => {
+      await deductPoints(uid, amount, tx);
+    });
+
+    return { success: true };
+  }
+);
+
+// ──────────────────────────────────────────────
+// 3일 미활동 방 자동 소멸 (매일 자정 KST 실행)
+// ──────────────────────────────────────────────
+export const cleanupExpiredRooms = onSchedule(
+  { schedule: "0 15 * * *", timeZone: "UTC", region: "asia-northeast3" },
+  async () => {
+    const now = Date.now();
+    const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+    const roomsRef = db.collection("square").doc("rooms").collection("list");
+
+    // ① deleteAt이 지난 방 (즉시 소멸 예약된 방)
+    const expiredSnap = await roomsRef
+      .where("deleteAt", "<=", now)
+      .get();
+
+    // ② 참여자 0명 + 마지막 활동 3일 초과
+    const inactiveSnap = await roomsRef
+      .where("participantCount", "==", 0)
+      .get();
+
+    const batch = db.batch();
+    let count = 0;
+
+    expiredSnap.docs.forEach((d) => {
+      batch.delete(d.ref);
+      count++;
+    });
+
+    inactiveSnap.docs.forEach((d) => {
+      const data = d.data();
+      const lastActivity: number = data.lastEnteredAt ?? data.createdAt ?? 0;
+      if (lastActivity < now - THREE_DAYS_MS) {
+        batch.delete(d.ref);
+        count++;
+      }
+    });
+
+    if (count > 0) {
+      await batch.commit();
+      console.log(`cleanupExpiredRooms: ${count}개 방 삭제 완료`);
+    } else {
+      console.log("cleanupExpiredRooms: 삭제할 방 없음");
+    }
   }
 );

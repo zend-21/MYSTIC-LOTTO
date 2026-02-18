@@ -1,14 +1,46 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getFixedDestinyNumbers = exports.getScientificReport = exports.getFortuneAndNumbers = void 0;
+exports.cleanupExpiredRooms = exports.spendPoints = exports.getFixedDestinyNumbers = exports.getScientificReport = exports.getFortuneAndNumbers = void 0;
+const admin = require("firebase-admin");
 const https_1 = require("firebase-functions/v2/https");
+const scheduler_1 = require("firebase-functions/v2/scheduler");
 const params_1 = require("firebase-functions/params");
 const genai_1 = require("@google/genai");
+admin.initializeApp();
+const db = admin.firestore();
 const GEMINI_API_KEY = (0, params_1.defineSecret)("GEMINI_API_KEY");
+// ── 포인트 비용 상수 ──────────────────────────────────────────
+const COST_DIVINE = 1000;
+const COST_SCIENCE = 1000;
+const COST_ANNUAL = 50000;
+const ADMIN_UID = "o5XegbLlnPVJhZtn31HXyddBGKW2";
+// ── 포인트 차감 헬퍼 (트랜잭션 내부에서 사용) ──────────────────
+async function deductPoints(uid, amount, tx) {
+    var _a, _b, _c;
+    if (uid === ADMIN_UID)
+        return; // 최고관리자는 무한 루멘
+    const userRef = db.collection("users").doc(uid);
+    const snap = await tx.get(userRef);
+    if (!snap.exists)
+        throw new https_1.HttpsError("not-found", "사용자 데이터를 찾을 수 없습니다.");
+    const currentPoints = (_c = (_b = (_a = snap.data()) === null || _a === void 0 ? void 0 : _a.orb) === null || _b === void 0 ? void 0 : _b.points) !== null && _c !== void 0 ? _c : 0;
+    if (currentPoints < amount) {
+        throw new https_1.HttpsError("failed-precondition", "루멘이 부족합니다.");
+    }
+    tx.update(userRef, { "orb.points": admin.firestore.FieldValue.increment(-amount) });
+}
 // ──────────────────────────────────────────────
-// 오늘의 운세 + 로또번호
+// 오늘의 운세 + 로또번호 (COST: 1,000 루멘)
 // ──────────────────────────────────────────────
 exports.getFortuneAndNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], region: "asia-northeast3", timeoutSeconds: 300 }, async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError("unauthenticated", "로그인이 필요합니다.");
+    const uid = request.auth.uid;
+    // ① 포인트 차감 (원자적 트랜잭션)
+    await db.runTransaction(async (tx) => {
+        await deductPoints(uid, COST_DIVINE, tx);
+    });
+    // ② AI 호출
     const profile = request.data;
     if (!profile || !profile.name) {
         throw new https_1.HttpsError("invalid-argument", "프로필 정보가 필요합니다.");
@@ -108,14 +140,30 @@ exports.getFortuneAndNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], 
     return JSON.parse(text);
 });
 // ──────────────────────────────────────────────
-// 지성 분석 리포트 (20,000회 계산은 클라이언트, Gemini 호출만 서버)
+// 지성 분석 리포트 (COST: 1,000 루멘)
 // ──────────────────────────────────────────────
 exports.getScientificReport = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], region: "asia-northeast3", timeoutSeconds: 60 }, async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError("unauthenticated", "로그인이 필요합니다.");
+    const uid = request.auth.uid;
+    // ① 포인트 차감
+    await db.runTransaction(async (tx) => {
+        await deductPoints(uid, COST_SCIENCE, tx);
+    });
+    // ② AI 호출
     const { candidate, metrics, engineLabel, algorithmMode, bradfordSets } = request.data;
     if (!candidate || !metrics) {
         throw new https_1.HttpsError("invalid-argument", "분석 데이터가 필요합니다.");
     }
     const ai = new genai_1.GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
+    const engineContextMap = {
+        BradfordLegacy: `2006년 10월 영국 브래드포드 대학의 수학 교수·조교를 포함한 교직원 17명이 모든 번호를 여러 조합에 분산 커버하는 전략으로 £530만(약 95억 원, 1인당 £31만)에 당첨된 실화를 구체적으로 언급하세요. 리더 Barry Waterhouse는 "모든 번호가 반드시 포함되는 방식"으로 전략을 바꿨고, 4년간의 개발 끝에 성공했다고 밝혔습니다. 이 기법은 '점'이 아닌 '그물'의 전략이며, 현재 추출된 번호가 그 전략의 핵심 조합임을 강조하세요.`,
+        Bradford: `이 번호는 'Balanced Coverage (공간 균형 분산)' 엔진으로 생성되었습니다. 1~9, 10~19, 20~29, 30~39, 40~45 의 5개 구역에서 균형 있게 번호를 추출하는 공간 분산 전략을 적용했습니다. 각 구역에서 최소 1개 이상의 번호가 선택되어 번호 공간 전체를 균등하게 커버합니다. 이 공간적 분산 배치가 통계적으로 어떤 강점을 제공하는지 전문적으로 분석하세요. Bradford Legacy의 실화와는 별도로, 순수 수학적 공간 균형 이론을 중심으로 설명하세요.`,
+        EntropyMax: `이 번호는 'Entropy Maximizer' 엔진으로 생성되었습니다. 50개의 후보 조합을 동시 생성하여 산술 복잡도(AC값)가 가장 높은 최적 조합을 선별했습니다. AC값이 높을수록 번호 간 간격 패턴의 다양성이 극대화되며, 인위적 편향이 배제된 진정한 엔트로피 상태를 의미합니다. 현재 AC값 ${metrics.acValue}가 달성한 엔트로피 수준을 심층 분석하고, 이 조합이 왜 50개 후보 중 최고 선택인지 설명하세요.`,
+        LowFrequency: `이 번호는 'Cold Number Recall (냉수 번호 회수)' 엔진으로 생성되었습니다. 최근 50회 추첨 기록에서 출현 빈도가 낮은 번호(냉수 번호)에 높은 가중치를 부여하여 선별했습니다. 통계적 평균으로의 회귀 원리(Regression to the Mean)에 따라 장기 미출현 번호의 복귀 압력이 높아지는 현상을 전략적으로 활용했습니다. 선택된 번호들의 최근 출현 패턴과 통계적 복귀 가능성을 심층 분석하세요.`,
+        Standard: `이 번호는 'Standard Random' 엔진으로 생성되었습니다. 편향 없는 무작위 추출 방식으로, 모든 통계 필터 조건을 통과한 가장 순수한 확률론적 조합입니다. 조합의 균형과 통계적 적합성을 중심으로 분석하세요.`,
+    };
+    const engineContext = engineContextMap[algorithmMode] || engineContextMap.Standard;
     const prompt = `
       당신은 '미스틱 로또 연구실(Mystic Lotto Lab)'의 AI 수석 분석가입니다.
       추출 번호: [${candidate.join(", ")}]
@@ -123,10 +171,9 @@ exports.getScientificReport = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], r
       알고리즘: ${engineLabel}
 
       분석 리포트 가이드라인:
-      1. 만약 알고리즘이 'Bradford Legacy'라면, 2006년 영국 브래드포드 대학 수학 교수 및 교직원 17명이 1~45번 모든 숫자를 조합에 골고루 포함시키는 전략으로 1등에 당첨된 실화를 구체적으로 언급하세요.
-      2. 이 기법은 '점'이 아닌 '그물'의 전략이며, 현재 추출된 번호가 그 그물망의 핵심 조합임을 강조하세요.
-      3. 벤포드 적합도(${metrics.benfordScore}점)가 주는 통계적 정합성과 산술 복잡도(AC) ${metrics.acValue}의 신뢰성을 전문적으로 설명하세요.
-      4. "미스틱 로또 연구실 AI 분석팀"으로 마무리하고 면책 조항을 포함하세요.
+      1. 엔진 설명 — ${engineContext}
+      2. 벤포드 적합도(${metrics.benfordScore}점)가 주는 통계적 정합성과 산술 복잡도(AC) ${metrics.acValue}의 신뢰성을 전문적으로 설명하세요.
+      3. "미스틱 로또 연구실 AI 분석팀"으로 마무리하고 면책 조항을 포함하세요.
     `;
     const response = await ai.models.generateContent({
         model: "gemini-3-pro-preview",
@@ -143,9 +190,17 @@ exports.getScientificReport = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], r
     return { finalReport };
 });
 // ──────────────────────────────────────────────
-// 연간 천명 대운 리포트
+// 연간 천명 대운 리포트 (COST: 50,000 루멘)
 // ──────────────────────────────────────────────
 exports.getFixedDestinyNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], region: "asia-northeast3", timeoutSeconds: 300 }, async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError("unauthenticated", "로그인이 필요합니다.");
+    const uid = request.auth.uid;
+    // ① 포인트 차감
+    await db.runTransaction(async (tx) => {
+        await deductPoints(uid, COST_ANNUAL, tx);
+    });
+    // ② AI 호출
     const profile = request.data;
     if (!profile || !profile.name) {
         throw new https_1.HttpsError("invalid-argument", "프로필 정보가 필요합니다.");
@@ -245,5 +300,62 @@ exports.getFixedDestinyNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY]
     if (!text)
         throw new https_1.HttpsError("internal", "AI 응답이 비어있습니다.");
     return JSON.parse(text);
+});
+// ──────────────────────────────────────────────
+// 범용 포인트 차감 (방 개설, 즉시 소멸, 황금카드, 장식 구매)
+// ──────────────────────────────────────────────
+exports.spendPoints = (0, https_1.onCall)({ region: "asia-northeast3" }, async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError("unauthenticated", "로그인이 필요합니다.");
+    const uid = request.auth.uid;
+    const { amount, reason } = request.data;
+    if (!amount || typeof amount !== "number" || amount <= 0) {
+        throw new https_1.HttpsError("invalid-argument", "유효하지 않은 금액입니다.");
+    }
+    if (!reason || typeof reason !== "string") {
+        throw new https_1.HttpsError("invalid-argument", "사용 목적이 필요합니다.");
+    }
+    await db.runTransaction(async (tx) => {
+        await deductPoints(uid, amount, tx);
+    });
+    return { success: true };
+});
+// ──────────────────────────────────────────────
+// 3일 미활동 방 자동 소멸 (매일 자정 KST 실행)
+// ──────────────────────────────────────────────
+exports.cleanupExpiredRooms = (0, scheduler_1.onSchedule)({ schedule: "0 15 * * *", timeZone: "UTC", region: "asia-northeast3" }, async () => {
+    const now = Date.now();
+    const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+    const roomsRef = db.collection("square").doc("rooms").collection("list");
+    // ① deleteAt이 지난 방 (즉시 소멸 예약된 방)
+    const expiredSnap = await roomsRef
+        .where("deleteAt", "<=", now)
+        .get();
+    // ② 참여자 0명 + 마지막 활동 3일 초과
+    const inactiveSnap = await roomsRef
+        .where("participantCount", "==", 0)
+        .get();
+    const batch = db.batch();
+    let count = 0;
+    expiredSnap.docs.forEach((d) => {
+        batch.delete(d.ref);
+        count++;
+    });
+    inactiveSnap.docs.forEach((d) => {
+        var _a, _b;
+        const data = d.data();
+        const lastActivity = (_b = (_a = data.lastEnteredAt) !== null && _a !== void 0 ? _a : data.createdAt) !== null && _b !== void 0 ? _b : 0;
+        if (lastActivity < now - THREE_DAYS_MS) {
+            batch.delete(d.ref);
+            count++;
+        }
+    });
+    if (count > 0) {
+        await batch.commit();
+        console.log(`cleanupExpiredRooms: ${count}개 방 삭제 완료`);
+    }
+    else {
+        console.log("cleanupExpiredRooms: 삭제할 방 없음");
+    }
 });
 //# sourceMappingURL=index.js.map

@@ -178,7 +178,8 @@ export interface OrbState {
   color: string;
   aura: string;
   activeDecorationId?: string;
-  points: number; 
+  points: number;
+  uniqueTag?: string;
   nickname?: string;
   giftHistory: GiftRecord[];
   mailbox: MailMessage[];
@@ -210,6 +211,8 @@ export interface ChatRoom {
   createdAt: number;
   isPermanent: boolean;
   deleteAt?: number; // 소멸 예정 타임스탬프
+  icon?: string; // 방 대표 이모지 아이콘
+  lastEnteredAt?: number; // 마지막 입장 타임스탬프 (3일 미방문 자동 소멸용)
 }
 
 export interface BoardComment {

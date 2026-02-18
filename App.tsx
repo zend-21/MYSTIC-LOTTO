@@ -1,8 +1,17 @@
 
+// 최고관리자 UID 목록
+const ADMIN_UIDS = ['o5XegbLlnPVJhZtn31HXyddBGKW2'];
+// 관리자 레벨/포인트 상수
+const ADMIN_LEVEL = 300;
+const SUB_ADMIN_LEVEL = 200;
+const ADMIN_INFINITE_POINTS = 999999999; // ∞ 표시 기준값
+// 포인트 표시 헬퍼
+const displayPoints = (pts: number) => pts >= ADMIN_INFINITE_POINTS ? '∞' : pts.toLocaleString();
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import KoreanLunarCalendar from 'korean-lunar-calendar';
-import { UserProfile, FortuneResult, SavedFortune, OrbState, CalendarType, ORB_DECORATIONS, GOLDEN_CARD_PRICE, OFFERING_CONVERSION_RATE, AnnualDestiny, ScientificAnalysisResult, ScientificFilterConfig, DAILY_LIMIT, COST_DIVINE, COST_SCIENCE, COST_ANNUAL, INITIAL_POINTS } from './types';
-import { getFortuneAndNumbers, getFixedDestinyNumbers } from './services/geminiService';
+import { UserProfile, FortuneResult, SavedFortune, OrbState, CalendarType, ORB_DECORATIONS, GOLDEN_CARD_PRICE, OFFERING_CONVERSION_RATE, AnnualDestiny, ScientificAnalysisResult, ScientificFilterConfig, DAILY_LIMIT, COST_ANNUAL, INITIAL_POINTS } from './types';
+import { getFortuneAndNumbers, getFixedDestinyNumbers, spendPoints } from './services/geminiService';
 import { getScientificRecommendation } from './services/scientificService';
 import { LottoRound } from './types';
 import FortuneOrb, { OrbVisual } from './components/FortuneOrb';
@@ -20,7 +29,7 @@ import MysticAnalysisLab from './components/MysticAnalysisLab';
 // Firebase imports
 import { auth, db, loginWithGoogle, logout } from './services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, deleteDoc, limit as fsLimit } from "firebase/firestore";
+import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, deleteDoc, limit as fsLimit, runTransaction, updateDoc, deleteField, where, getDocs, writeBatch, increment } from "firebase/firestore";
 
 interface CitySuggestion {
   display: string;
@@ -30,6 +39,9 @@ interface CitySuggestion {
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const isAdmin = ADMIN_UIDS.includes(currentUser?.uid ?? '');
+  const [subAdminConfig, setSubAdminConfig] = useState<{ [uid: string]: number }>({});
+  const isSubAdmin = !isAdmin && (currentUser?.uid ? currentUser.uid in subAdminConfig : false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(false);
   const [scienceLoading, setScienceLoading] = useState(false);
@@ -64,7 +76,10 @@ const App: React.FC = () => {
   const [adminNumbers, setAdminNumbers] = useState(['', '', '', '', '', '']);
   const [adminBonus, setAdminBonus] = useState('');
   const [singleInputStr, setSingleInputStr] = useState(''); 
-  const [deleteConfirmRound, setDeleteConfirmRound] = useState<number | null>(null); 
+  const [deleteConfirmRound, setDeleteConfirmRound] = useState<number | null>(null);
+  const [newSubAdminUid, setNewSubAdminUid] = useState('');
+  const [newSubAdminPoints, setNewSubAdminPoints] = useState('');
+  const [subAdminActionLoading, setSubAdminActionLoading] = useState(false);
 
   const [inputName, setInputName] = useState('');
   const [birthYear, setBirthYear] = useState('');
@@ -137,18 +152,69 @@ const App: React.FC = () => {
   });
 
   // --- Firebase Sync Logic ---
-  
+
+  // 유니크 태그 생성 (최초 1회, 충돌 방지 트랜잭션)
+  const ensureUniqueTag = async (user: import('firebase/auth').User) => {
+    const userDocRef = doc(db, "users", user.uid);
+    const snap = await getDoc(userDocRef);
+    if (snap.exists() && snap.data()?.orb?.uniqueTag) return; // 이미 있으면 패스
+
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    const genCandidate = () => Array.from({ length: 7 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const candidate = genCandidate();
+      const tagDocRef = doc(db, "userTags", candidate);
+      try {
+        await runTransaction(db, async (tx) => {
+          const tagSnap = await tx.get(tagDocRef);
+          if (tagSnap.exists()) throw new Error("taken");
+          tx.set(tagDocRef, { uid: user.uid });
+          tx.set(userDocRef, { orb: { uniqueTag: `@${candidate}` } }, { merge: true });
+        });
+        break; // 성공 시 루프 종료
+      } catch {
+        // 충돌 시 재시도
+      }
+    }
+  };
+
   // 1. Auth & Data Stream
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setCurrentUser(user);
+        ensureUniqueTag(user);
+
+        // 부관리자 설정 로드
+        const subAdminSnap = await getDoc(doc(db, "config", "subAdmins"));
+        const subAdminData: { [uid: string]: number } = subAdminSnap.exists()
+          ? (subAdminSnap.data() as { [uid: string]: number })
+          : {};
+        setSubAdminConfig(subAdminData);
+
         const userDocRef = doc(db, "users", user.uid);
         const unsubscribeUser = onSnapshot(userDocRef, (snap) => {
           if (snap.exists()) {
             const data = snap.data();
             if (data.profile) setProfile(data.profile);
-            if (data.orb) setOrb(data.orb);
+            if (data.orb) {
+              let orbData = { ...data.orb };
+              if (ADMIN_UIDS.includes(user.uid)) {
+                // 최고관리자: 레벨 300 고정, 무한 루멘
+                orbData.level = ADMIN_LEVEL;
+                orbData.points = ADMIN_INFINITE_POINTS;
+              } else if (user.uid in subAdminData) {
+                // 부관리자: 레벨 200 미만으로 떨어지지 않음
+                orbData.level = Math.max(orbData.level ?? 1, SUB_ADMIN_LEVEL);
+                // 최초 부관리자 임명 시 포인트 설정 (레벨이 200 미만이었던 경우)
+                if ((data.orb.level ?? 1) < SUB_ADMIN_LEVEL) {
+                  orbData.points = subAdminData[user.uid];
+                  setDoc(userDocRef, { orb: orbData }, { merge: true });
+                }
+              }
+              setOrb(orbData);
+            }
           } else {
             // New user initialization
             setDoc(userDocRef, { orb: { ...orb, points: INITIAL_POINTS } }, { merge: true });
@@ -158,7 +224,26 @@ const App: React.FC = () => {
         const unsubscribeArchives = onSnapshot(archivesQuery, (snapshot) => {
           setArchives(snapshot.docs.map(d => d.data() as SavedFortune));
         });
-        return () => { unsubscribeUser(); unsubscribeArchives(); };
+
+        // 선물 inbox 리스너 — 누군가 루멘을 선물하면 자동으로 포인트 반영
+        const inboxRef = collection(db, "users", user.uid, "inbox");
+        const unsubscribeInbox = onSnapshot(inboxRef, async (snap) => {
+          if (snap.empty) return;
+          let totalGift = 0;
+          const batch = writeBatch(db);
+          snap.docs.forEach(d => {
+            totalGift += (d.data().amount || 0);
+            batch.delete(d.ref);
+          });
+          if (totalGift > 0) {
+            // increment로 Firestore 포인트 원자적 증가 → onSnapshot이 최신값 반영
+            batch.update(userDocRef, { 'orb.points': increment(totalGift) });
+            await batch.commit().catch(() => {});
+            setToast(`${totalGift.toLocaleString()} 루멘을 선물받았습니다! ✨`);
+          }
+        });
+
+        return () => { unsubscribeUser(); unsubscribeArchives(); unsubscribeInbox(); };
       } else {
         setCurrentUser(null);
         setProfile(null);
@@ -186,11 +271,31 @@ const App: React.FC = () => {
     }
     if (currentUser) {
       const timer = setTimeout(async () => {
-        await setDoc(doc(db, "users", currentUser.uid), { profile, orb }, { merge: true });
+        // points는 서버(Cloud Functions)가 단독 관리 — 클라이언트 auto-sync에서 제외
+        const { points: _points, ...orbWithoutPoints } = orb;
+        await setDoc(doc(db, "users", currentUser.uid), { profile, orb: orbWithoutPoints }, { merge: true });
       }, 500); // Debounce sync
       return () => clearTimeout(timer);
     }
   }, [profile, orb, currentUser]);
+
+  // 3. 닉네임 변경 시 내가 만든 대화방 creatorName 일괄 갱신
+  const prevNicknameRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const newNick = orb.nickname;
+    if (!currentUser || !newNick || newNick === prevNicknameRef.current) return;
+    prevNicknameRef.current = newNick;
+    (async () => {
+      try {
+        const q = query(collection(db, "square", "rooms", "list"), where("creatorId", "==", currentUser.uid));
+        const snap = await getDocs(q);
+        if (snap.empty) return;
+        const batch = writeBatch(db);
+        snap.docs.forEach(d => batch.update(d.ref, { creatorName: newNick }));
+        await batch.commit();
+      } catch { /* 권한 없거나 방이 없으면 무시 */ }
+    })();
+  }, [orb.nickname, currentUser]);
 
   const onUpdateProfile = (newProfile: UserProfile) => setProfile(newProfile);
   const onUpdateOrb = (newOrb: OrbState) => setOrb(newOrb);
@@ -274,12 +379,6 @@ const App: React.FC = () => {
     return true;
   };
 
-  const deductPoints = (amount: number): boolean => {
-    if (orb.points < amount) return false;
-    setOrb({ ...orb, points: orb.points - amount });
-    return true;
-  };
-
   const updatePoints = (amount: number) => setOrb({ ...orb, points: orb.points + amount });
   const updateFavorites = (roomIds: string[]) => setOrb({ ...orb, favoriteRoomIds: roomIds });
 
@@ -288,9 +387,13 @@ const App: React.FC = () => {
     return messages[Math.floor(Math.random() * messages.length)];
   };
 
-  const addPoints = (amount: number) => setOrb(prev => ({ ...prev, points: prev.points + amount }));
+  const addPoints = async (amount: number) => {
+    if (!currentUser) return;
+    await updateDoc(doc(db, "users", currentUser.uid), { "orb.points": increment(amount) });
+    // onSnapshot이 최신 포인트를 자동으로 반영
+  };
 
-  const buyDecoration = (id: string, price: number) => {
+  const buyDecoration = async (id: string, price: number) => {
     if (orb.purchasedDecorationIds.includes(id)) {
       setOrb({ ...orb, activeDecorationId: id });
       onToast("기운의 형상을 변경하였습니다.");
@@ -300,13 +403,17 @@ const App: React.FC = () => {
       onToast("장식을 획득하기 위한 루멘이 부족합니다.");
       return;
     }
-    setOrb({
-      ...orb,
-      points: orb.points - price,
-      purchasedDecorationIds: [...orb.purchasedDecorationIds, id],
-      activeDecorationId: id
-    });
-    onToast("새로운 기운의 장식을 획득하였습니다!");
+    try {
+      await spendPoints(price, `decoration_${id}`);
+      setOrb((prev: OrbState) => ({
+        ...prev,
+        purchasedDecorationIds: [...prev.purchasedDecorationIds, id],
+        activeDecorationId: id
+      }));
+      onToast("새로운 기운의 장식을 획득하였습니다!");
+    } catch (err: any) {
+      onToast(err?.message?.includes("루멘이 부족") ? "루멘이 부족합니다." : "장식 구매에 실패했습니다.");
+    }
   };
 
   const handleOfferAmount = (amount: number) => {
@@ -318,10 +425,10 @@ const App: React.FC = () => {
     setOfferingData({ amount, multiplier });
   };
 
-  const handleOfferingComplete = () => {
+  const handleOfferingComplete = async () => {
     if (offeringData) {
       const totalLumen = offeringData.amount * OFFERING_CONVERSION_RATE * offeringData.multiplier;
-      addPoints(totalLumen);
+      await addPoints(totalLumen);
       growOrb(Math.floor(totalLumen / 100));
       onToast(`${totalLumen.toLocaleString()} L 의 기운을 하사받았습니다.`);
       setOfferingData(null);
@@ -346,14 +453,19 @@ const App: React.FC = () => {
     setConfirmModal(prev => ({ ...prev, isOpen: false }));
     setLoading(true);
     try {
+      // 포인트 차감은 Cloud Function 내부에서 서버사이드 처리
       const res = await getFortuneAndNumbers(profile);
       setResult(res);
       await saveToArchive('divine', res);
-      setOrb(prev => ({ ...prev, points: prev.points - COST_DIVINE, dailyExtractCount: prev.dailyExtractCount + 1 }));
+      // dailyExtractCount만 클라이언트 상태로 갱신 (UX 목적)
+      setOrb(prev => ({ ...prev, dailyExtractCount: prev.dailyExtractCount + 1 }));
       growOrb(30);
       onToast("오늘의 천기가 기록되었습니다.");
-    } catch (err) {
-      onToast("우주의 기운이 불안정합니다. 다시 시도해주세요.");
+    } catch (err: any) {
+      const msg = err?.message?.includes("루멘이 부족")
+        ? "루멘이 부족합니다."
+        : "우주의 기운이 불안정합니다. 다시 시도해주세요.";
+      onToast(msg);
     } finally {
       setLoading(false);
     }
@@ -364,37 +476,40 @@ const App: React.FC = () => {
     setConfirmModal(prev => ({ ...prev, isOpen: false }));
     setScienceLoading(true);
     try {
+      // 포인트 차감은 Cloud Function(getScientificReport) 내부에서 서버사이드 처리
       const res = await getScientificRecommendation(pendingScienceConfig);
       setScientificResult(res);
       await saveToArchive('scientific', res);
-      deductPoints(COST_SCIENCE);
       growOrb(30);
       onToast("지성 분석 리포트가 도출되었습니다.");
-    } catch (err) {
-      onToast("분석 엔진 가동에 오류가 발생했습니다.");
+    } catch (err: any) {
+      const msg = err?.message?.includes("루멘이 부족")
+        ? "루멘이 부족합니다."
+        : "분석 엔진 가동에 오류가 발생했습니다.";
+      onToast(msg);
     } finally {
       setScienceLoading(false);
     }
   };
 
-  const buyGoldenCard = () => {
+  const buyGoldenCard = async () => {
     if (orb.points < GOLDEN_CARD_PRICE) { onToast("유물을 소유하기 위한 루멘이 부족합니다."); return; }
-    const cardId = `MYSTIC-${Math.floor(1000 + Math.random() * 8999)}-GOLD`;
-    setOrb({
-      ...orb,
-      points: orb.points - GOLDEN_CARD_PRICE,
-      hasGoldenCard: true,
-      goldenCardId: cardId
-    });
-    onToast("천상의 유물 '천부인'의 주인이 되셨습니다!");
+    try {
+      await spendPoints(GOLDEN_CARD_PRICE, "golden_card");
+      const cardId = `MYSTIC-${Math.floor(1000 + Math.random() * 8999)}-GOLD`;
+      setOrb(prev => ({ ...prev, hasGoldenCard: true, goldenCardId: cardId } as OrbState));
+      onToast("천상의 유물 '천부인'의 주인이 되셨습니다!");
+    } catch (err: any) {
+      onToast(err?.message?.includes("루멘이 부족") ? "루멘이 부족합니다." : "유물 구매에 실패했습니다.");
+    }
   };
 
   const currentYear = new Date().getFullYear();
   const currentDestiny = orb.annualDestinies ? orb.annualDestinies[currentYear] : undefined;
 
   const handleUnlockAnnualRitual = () => {
+    // 포인트 차감은 startFixedRitual → getFixedDestinyNumbers Cloud Function에서 처리
     if (orb.points < COST_ANNUAL) { onToast("영원한 의식을 위한 루멘이 부족합니다."); return; }
-    updatePoints(-COST_ANNUAL);
     setIsRitualUnlocked(true);
     onToast("올해의 운명이 봉인 해제되었습니다. 이제 인장을 각인하십시오.");
   };
@@ -481,6 +596,53 @@ const App: React.FC = () => {
   const handleSelectHour = (h: string) => { setSelectedHour(h); setTimePickerStep('minute'); };
   const handleSelectMinute = (m: string) => { setSelectedMinute(m); setShowTimePicker(false); setTimePickerStep('ampm'); };
 
+  const resetAdminForm = () => {
+    const next = lottoHistory.length > 0 ? lottoHistory[0].round + 1 : 1;
+    setAdminRound(next.toString());
+    setAdminNumbers(['', '', '', '', '', '']);
+    setAdminBonus('');
+    setSingleInputStr('');
+    setIsEditingExisting(false);
+  };
+
+  const handleAppointSubAdmin = async () => {
+    const uid = newSubAdminUid.trim();
+    const pts = parseInt(newSubAdminPoints);
+    if (!uid || isNaN(pts) || pts < 0) { onToast("UID와 루멘 수치를 올바르게 입력해주세요."); return; }
+    if (ADMIN_UIDS.includes(uid)) { onToast("최고관리자는 부관리자로 임명할 수 없습니다."); return; }
+    setSubAdminActionLoading(true);
+    try {
+      const configRef = doc(db, "config", "subAdmins");
+      await setDoc(configRef, { [uid]: pts }, { merge: true });
+      setSubAdminConfig((prev: { [uid: string]: number }) => ({ ...prev, [uid]: pts }));
+      setNewSubAdminUid('');
+      setNewSubAdminPoints('');
+      onToast(`부관리자 임명 완료: ${uid}`);
+    } catch (e) {
+      onToast("임명 실패: 권한을 확인해주세요.");
+    } finally {
+      setSubAdminActionLoading(false);
+    }
+  };
+
+  const handleDismissSubAdmin = async (uid: string) => {
+    setSubAdminActionLoading(true);
+    try {
+      const configRef = doc(db, "config", "subAdmins");
+      await updateDoc(configRef, { [uid]: deleteField() });
+      setSubAdminConfig((prev: { [uid: string]: number }) => {
+        const next = { ...prev };
+        delete next[uid];
+        return next;
+      });
+      onToast(`부관리자 해임 완료: ${uid}`);
+    } catch (e) {
+      onToast("해임 실패: 권한을 확인해주세요.");
+    } finally {
+      setSubAdminActionLoading(false);
+    }
+  };
+
   const handleRegisterLotto = async () => {
     const roundNum = parseInt(adminRound);
     const nums = adminNumbers.map(n => parseInt(n)).filter(n => !isNaN(n));
@@ -565,7 +727,8 @@ const App: React.FC = () => {
       <div className="min-h-screen flex items-center justify-center p-4 bg-[#020617]">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_rgba(30,58,138,0.2),_transparent)] pointer-events-none"></div>
         <div className="relative z-10 glass p-10 rounded-[3rem] w-full max-w-lg space-y-10 animate-in fade-in zoom-in duration-700 shadow-2xl border-white/5 text-center">
-          <div className="space-y-3">
+          <div className="space-y-3 flex flex-col items-center">
+            <img src="/s_mlotto_logo.png" alt="Mystic" className="w-24 h-24 object-contain drop-shadow-[0_0_24px_rgba(99,102,241,0.5)]" />
             <h1 className="text-5xl font-mystic font-bold text-transparent bg-clip-text bg-gradient-to-b from-indigo-200 via-indigo-400 to-indigo-600 tracking-tighter uppercase">Mystic Lotto</h1>
             <p className="text-slate-500 text-[10px] font-black tracking-[0.6em] uppercase">Fate & Resonance</p>
           </div>
@@ -717,7 +880,7 @@ const App: React.FC = () => {
       {isAdminModalOpen && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-black/80 backdrop-blur-xl animate-in fade-in duration-300">
            <div className="glass p-10 rounded-[3rem] border border-indigo-500/30 w-full max-w-2xl shadow-2xl space-y-10 relative overflow-hidden flex flex-col max-h-[90vh]">
-              <button onClick={() => { setIsAdminModalOpen(false); setIsEditingExisting(false); }} className="absolute top-8 right-8 text-slate-500 hover:text-white transition-colors text-2xl">✕</button>
+              <button onClick={() => { resetAdminForm(); setIsAdminModalOpen(false); }} className="absolute top-8 right-8 text-slate-500 hover:text-white transition-colors text-2xl">✕</button>
               <div className="text-center space-y-2">
                  <h3 className="text-2xl font-mystic font-black text-indigo-400 tracking-widest uppercase">{isEditingExisting ? 'Admin: 번호 수정' : 'Admin: 당첨번호 등록'}</h3>
                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Lotto History Management</p>
@@ -725,8 +888,16 @@ const App: React.FC = () => {
               <div className="flex-1 overflow-y-auto pr-2 custom-scroll space-y-12">
                  <div className="space-y-6">
                     <div className="space-y-2">
-                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">회차 입력 (Round)</label>
-                       <input type="number" value={adminRound} onChange={e => setAdminRound(e.target.value)} className="w-full bg-slate-950/50 border border-slate-800 rounded-xl p-4 text-white font-bold focus:border-indigo-500 outline-none" />
+                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                         회차 {isEditingExisting ? '(수정 가능)' : '(자동 설정)'}
+                       </label>
+                       <input
+                         type="number"
+                         value={adminRound}
+                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => { if (isEditingExisting) setAdminRound(e.target.value.replace(/\D/g, '')); }}
+                         readOnly={!isEditingExisting}
+                         className={`w-full bg-slate-950/50 border rounded-xl p-4 text-white font-bold outline-none transition-all ${isEditingExisting ? 'border-indigo-500/60 focus:border-indigo-400' : 'border-slate-800 opacity-60 cursor-not-allowed select-none'}`}
+                       />
                     </div>
                     <div className="space-y-3">
                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{isEditingExisting ? '번호별 수정' : '당첨번호 & 보너스 통합 입력 (예: 10. 20. ...)'}</label>
@@ -741,28 +912,85 @@ const App: React.FC = () => {
                            <p className="text-[9px] text-slate-600 font-bold italic uppercase px-1">※ 숫자를 치고 마침표(.)를 입력하면 자동으로 칸이 나뉩니다.</p>
                        </div>
                     </div>
-                    <button onClick={handleRegisterLotto} className="w-full py-4 bg-indigo-600 text-white font-black rounded-xl uppercase tracking-[0.2em] text-xs shadow-xl hover:bg-indigo-500 transition-all">{isEditingExisting ? '수정 사항 반영' : '번호 등록 및 갱신'}</button>
+                    <div className="flex gap-3">
+                      <button onClick={handleRegisterLotto} className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-xl uppercase tracking-[0.2em] text-xs shadow-xl hover:bg-indigo-500 transition-all">{isEditingExisting ? '수정 사항 반영' : '번호 등록 및 갱신'}</button>
+                      {isEditingExisting && (
+                        <button onClick={resetAdminForm} className="px-6 py-4 bg-slate-700 text-slate-300 font-black rounded-xl text-xs hover:bg-slate-600 transition-all">취소</button>
+                      )}
+                    </div>
                  </div>
                  <div className="space-y-6">
                     <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-white/5 pb-2">최근 관리</h4>
                     <div className="space-y-3">
-                       {lottoHistory.slice(0, 5).map((round) => (
-                         <div key={round.round} className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5 group hover:border-indigo-500/20 transition-all">
-                            <span className="text-[11px] font-black text-indigo-400 uppercase w-12">{round.round}회</span>
-                            <div className="flex space-x-2">
-                               {round.numbers.map(n => <span key={n} className="w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-bold">{n}</span>)}
-                               <span className="w-7 h-7 rounded-full bg-indigo-900/50 flex items-center justify-center text-[10px] font-bold text-indigo-200">{round.bonus}</span>
-                            </div>
-                            <div className="flex space-x-2">
-                              <button onClick={() => handleEditRound(round)} className="px-4 py-2 bg-white/5 rounded-lg text-[10px] font-black text-slate-400 hover:text-white transition-all">수정</button>
-                              <button onClick={() => setDeleteConfirmRound(round.round)} className="px-4 py-2 bg-rose-900/20 rounded-lg text-[10px] font-black text-rose-400 hover:text-white transition-all">삭제</button>
-                            </div>
-                         </div>
-                       ))}
+                       {lottoHistory.slice(0, 5).map((round: LottoRound) => {
+                         const lastRound = lottoHistory.length > 0 ? lottoHistory[0].round : null;
+                         return (
+                           <div key={round.round} className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5 group hover:border-indigo-500/20 transition-all">
+                              <span className="text-[11px] font-black text-indigo-400 uppercase w-12">{round.round}회</span>
+                              <div className="flex space-x-2">
+                                 {round.numbers.map(n => <span key={n} className="w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-bold">{n}</span>)}
+                                 <span className="w-7 h-7 rounded-full bg-indigo-900/50 flex items-center justify-center text-[10px] font-bold text-indigo-200">{round.bonus}</span>
+                              </div>
+                              <div className="flex space-x-2">
+                                <button onClick={() => handleEditRound(round)} className="px-4 py-2 bg-white/5 rounded-lg text-[10px] font-black text-slate-400 hover:text-white transition-all">수정</button>
+                                {round.round === lastRound && (
+                                  <button onClick={() => setDeleteConfirmRound(round.round)} className="px-4 py-2 bg-rose-900/20 rounded-lg text-[10px] font-black text-rose-400 hover:text-white transition-all">삭제</button>
+                                )}
+                              </div>
+                           </div>
+                         );
+                       })}
                     </div>
                  </div>
+                 {/* ── 부관리자 관리 ── */}
+                 <div className="space-y-6">
+                    <h4 className="text-[10px] font-black text-purple-400 uppercase tracking-widest border-b border-purple-500/20 pb-2">부관리자 관리</h4>
+                    <div className="space-y-3">
+                       <input
+                         type="text"
+                         value={newSubAdminUid}
+                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewSubAdminUid(e.target.value)}
+                         className="w-full bg-slate-950/50 border border-slate-700 rounded-xl p-3 text-white font-mono text-xs outline-none focus:border-purple-500 transition-all"
+                         placeholder="Firebase UID 입력"
+                       />
+                       <div className="flex gap-2">
+                         <input
+                           type="number"
+                           value={newSubAdminPoints}
+                           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewSubAdminPoints(e.target.value)}
+                           className="flex-1 bg-slate-950/50 border border-slate-700 rounded-xl p-3 text-white font-bold text-xs outline-none focus:border-purple-500 transition-all"
+                           placeholder="부여할 루멘 수치"
+                           min="0"
+                         />
+                         <button
+                           onClick={handleAppointSubAdmin}
+                           disabled={subAdminActionLoading || !newSubAdminUid.trim() || !newSubAdminPoints}
+                           className="px-5 py-3 bg-purple-600 text-white font-black rounded-xl text-xs hover:bg-purple-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                         >임명</button>
+                       </div>
+                    </div>
+                    {Object.keys(subAdminConfig).length > 0 ? (
+                      <div className="space-y-2">
+                        {Object.entries(subAdminConfig).map(([uid, pts]) => (
+                          <div key={uid} className="flex items-center justify-between p-3 bg-purple-900/10 rounded-xl border border-purple-500/10">
+                            <div className="space-y-0.5">
+                              <p className="font-mono text-[10px] text-purple-300 break-all">{uid}</p>
+                              <p className="text-[9px] text-slate-500">루멘 {pts.toLocaleString()} · Lv.{SUB_ADMIN_LEVEL}</p>
+                            </div>
+                            <button
+                              onClick={() => handleDismissSubAdmin(uid)}
+                              disabled={subAdminActionLoading}
+                              className="ml-3 px-3 py-2 bg-rose-900/30 rounded-lg text-[10px] font-black text-rose-400 hover:text-white hover:bg-rose-700/40 transition-all shrink-0 disabled:opacity-40"
+                            >해임</button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-slate-600 italic text-center">임명된 부관리자가 없습니다.</p>
+                    )}
+                 </div>
               </div>
-              <button onClick={() => { setIsAdminModalOpen(false); setIsEditingExisting(false); }} className="w-full py-5 bg-slate-800 text-white font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-slate-700 transition-all shrink-0">관리 종료</button>
+              <button onClick={() => { resetAdminForm(); setIsAdminModalOpen(false); }} className="w-full py-5 bg-slate-800 text-white font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-slate-700 transition-all shrink-0">관리 종료</button>
               {deleteConfirmRound && (
                 <div className="absolute inset-0 z-[11000] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-200">
                   <div className="glass p-10 rounded-[3rem] border border-rose-500/30 max-sm w-full text-center space-y-8 shadow-[0_0_50px_rgba(244,63,94,0.2)]">
@@ -780,7 +1008,7 @@ const App: React.FC = () => {
       )}
 
       {view === 'square' && <CelestialSquare profile={profile} orb={orb} onUpdatePoints={updatePoints} onUpdateFavorites={updateFavorites} onBack={() => setView('main')} onToast={onToast} />}
-      {view === 'profile' && <UserProfilePage profile={profile} orb={orb} archives={archives} onUpdateProfile={onUpdateProfile} onUpdateOrb={onUpdateOrb} onWithdraw={handleWithdrawAction} onBack={() => setView('main')} onToast={onToast} />}
+      {view === 'profile' && <UserProfilePage profile={profile} orb={orb} archives={archives} onUpdateProfile={onUpdateProfile} onUpdateOrb={onUpdateOrb} onWithdraw={handleWithdrawAction} onBack={() => setView('main')} onToast={onToast} isAdmin={isAdmin} />}
       {view === 'analysis' && <MysticAnalysisLab lottoHistory={lottoHistory} onBack={() => setView('main')} />}
       {offeringData && <DivineEffect amount={offeringData.amount} multiplier={offeringData.multiplier} onComplete={handleOfferingComplete} />}
       {toast && (<div className="fixed inset-0 flex items-center justify-center z-[6000] pointer-events-none px-6"><div className="bg-slate-900/40 backdrop-blur-3xl text-white px-12 py-7 rounded-[2.5rem] shadow-[0_40px_100px_rgba(0,0,0,0.8)] border border-white/10 text-center animate-in zoom-in-95 duration-500 max-w-md"><p className="text-xl font-bold leading-tight whitespace-pre-line">{toast}</p></div></div>)}
@@ -814,7 +1042,8 @@ const App: React.FC = () => {
       )}
 
       <header className="sticky top-0 z-[100] glass border-b border-white/5 px-8 py-4 flex justify-between items-center">
-        <div className="flex items-center space-x-6">
+        <div className="flex items-center space-x-4">
+          <img src="/s_mlotto_logo.png" alt="Mystic" className="w-10 h-10 object-contain drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
           <div className="flex flex-col"><h2 className="text-2xl font-mystic font-black text-white tracking-widest leading-none">MYSTIC</h2><span className="text-[8px] text-indigo-400 uppercase font-bold tracking-[0.5em] mt-1">Lotto Resonance</span></div>
           <div className="hidden md:flex flex-col ml-6"><p className="text-[10px] text-indigo-100 font-bold italic animate-pulse">"{getDivineMessage()}"</p></div>
         </div>
@@ -833,7 +1062,9 @@ const App: React.FC = () => {
                 <div className="absolute top-full right-0 mt-2 w-56 bg-[#020617] p-2 rounded-2xl border border-white/10 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-200">
                   <button onClick={() => { setView('square'); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-indigo-600/20 text-indigo-100 text-xs font-black uppercase transition-all"><span>🌌</span><span>천상의 광장 가기</span></button>
                   <button onClick={() => { setView('analysis'); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-cyan-600/20 text-cyan-100 text-xs font-black uppercase transition-all"><span>📊</span><span>미스틱 분석 제단</span></button>
-                  <button onClick={() => { setIsAdminModalOpen(true); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-amber-600/20 text-amber-100 text-xs font-black uppercase transition-all"><span>🎫</span><span>당첨번호 등록 (Admin)</span></button>
+                  {isAdmin && (
+                    <button onClick={() => { const next = lottoHistory.length > 0 ? lottoHistory[0].round + 1 : 1; setAdminRound(next.toString()); setIsAdminModalOpen(true); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-amber-600/20 text-amber-100 text-xs font-black uppercase transition-all"><span>🎫</span><span>당첨번호 등록 (Admin)</span></button>
+                  )}
                   <div className="h-[1px] bg-white/5 my-1"></div>
                   <button onClick={async () => { await logout(); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-red-600/20 text-red-100 text-xs font-black uppercase transition-all"><span>🚪</span><span>로그아웃</span></button>
                 </div>
@@ -858,7 +1089,7 @@ const App: React.FC = () => {
           <div className="space-y-24">
             <section className="relative flex flex-col items-center animate-in fade-in duration-700">
               <FortuneOrb orb={orb} onGrow={() => { growOrb(5); addPoints(50); }} />
-              <button onClick={() => setShowShop(!showShop)} className="mt-10 px-10 py-4 bg-indigo-500/10 border-2 border-indigo-500/30 rounded-full text-sm font-black text-indigo-200 hover:bg-indigo-500/20 transition-all flex items-center space-x-3 shadow-2xl backdrop-blur-xl"><span>✨</span><span className="tracking-[0.2em] uppercase">신비의 상점</span><span className="bg-indigo-500 text-white px-3 py-1 rounded-full text-[10px] ml-4">{orb.points.toLocaleString()} L</span></button>
+              <button onClick={() => setShowShop(!showShop)} className="mt-10 px-10 py-4 bg-indigo-500/10 border-2 border-indigo-500/30 rounded-full text-sm font-black text-indigo-200 hover:bg-indigo-500/20 transition-all flex items-center space-x-3 shadow-2xl backdrop-blur-xl"><span>✨</span><span className="tracking-[0.2em] uppercase">신비의 상점</span><span className="bg-indigo-500 text-white px-3 py-1 rounded-full text-[10px] ml-4">{displayPoints(orb.points)} L</span></button>
               {showShop && (
                 <div className="absolute top-28 right-0 md:right-1/2 md:translate-x-1/2 w-80 glass p-8 rounded-[3rem] z-40 border-indigo-500/40 shadow-2xl animate-in fade-in zoom-in duration-300 max-h-[60vh] overflow-y-auto">
                   <div className="space-y-3">
@@ -927,7 +1158,7 @@ const App: React.FC = () => {
          </div>
          <div className="text-right">
             <p className="text-[11px] text-slate-500 font-black uppercase tracking-widest mb-1.5">Divine Essence (루멘)</p>
-            <p className="text-3xl font-mystic font-black text-yellow-500 tabular-nums">{orb.points.toLocaleString()} <span className="text-sm font-sans">L</span></p>
+            <p className="text-3xl font-mystic font-black text-yellow-500 tabular-nums">{displayPoints(orb.points)} <span className="text-sm font-sans">L</span></p>
          </div>
       </footer>
 
