@@ -1,5 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { UserProfile, OrbState, SavedFortune, ORB_DECORATIONS, CalendarType } from '../types';
+import KoreanLunarCalendar from 'korean-lunar-calendar';
 import { OrbVisual } from './FortuneOrb';
 
 interface UserProfilePageProps {
@@ -36,6 +37,28 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
   const [editGender, setEditGender] = useState(profile.gender);
   const [editCalendarType, setEditCalendarType] = useState(profile.calendarType);
   const [editCity, setEditCity] = useState(profile.birthCity);
+
+  // 편집 폼용 음력 날짜 텍스트
+  const editLunarText = useMemo(() => {
+    if (!editBirthDate) return null;
+    const parts = editBirthDate.split('-');
+    if (parts.length !== 3) return null;
+    const y = parseInt(parts[0]), m = parseInt(parts[1]), d = parseInt(parts[2]);
+    if (!y || !m || !d) return null;
+    try {
+      const cal = new KoreanLunarCalendar();
+      if (editCalendarType === 'solar') {
+        if (!cal.setSolarDate(y, m, d)) return null;
+        const lunar = cal.getLunarCalendar();
+        const inter = lunar.intercalation ? ' (윤달)' : '';
+        return `음력 ${lunar.year}.${String(lunar.month).padStart(2, '0')}.${String(lunar.day).padStart(2, '0')}${inter}`;
+      } else {
+        if (!cal.setLunarDate(y, m, d, profile.isIntercalary ?? false)) return null;
+        const solar = cal.getSolarCalendar();
+        return `≈ 양력 ${solar.year}.${String(solar.month).padStart(2, '0')}.${String(solar.day).padStart(2, '0')}`;
+      }
+    } catch { return null; }
+  }, [editBirthDate, editCalendarType, profile.isIntercalary]);
   const [selectedCoords, setSelectedCoords] = useState<{lat: number, lon: number} | null>(
     profile.lat && profile.lon ? { lat: profile.lat, lon: profile.lon } : null
   );
@@ -262,12 +285,15 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                               </div>
                               <div className="space-y-4">
                                  <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest px-1">Birth Date (생년월일)</label>
-                                 <input 
-                                   type="date" 
-                                   value={editBirthDate} 
-                                   onChange={e => setEditBirthDate(e.target.value)} 
-                                   className="w-full bg-slate-950/50 border border-slate-800 focus:border-indigo-500 rounded-2xl p-4 text-white font-bold outline-none transition-all shadow-inner" 
+                                 <input
+                                   type="date"
+                                   value={editBirthDate}
+                                   onChange={e => setEditBirthDate(e.target.value)}
+                                   className="w-full bg-slate-950/50 border border-slate-800 focus:border-indigo-500 rounded-2xl p-4 text-white font-bold outline-none transition-all shadow-inner"
                                  />
+                                 {editLunarText && (
+                                   <p className="text-[10px] text-yellow-400 font-bold px-1">{editLunarText}</p>
+                                 )}
                               </div>
                               <div className="space-y-4">
                                  <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest px-1">Birth Time (태어난 시간)</label>

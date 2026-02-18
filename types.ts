@@ -56,11 +56,13 @@ export interface ScientificFilterConfig {
   gapMin: number; 
   carryOverRange: [number, number]; 
   neighborRange: [number, number]; 
-  algorithmMode: 'Standard' | 'Bradford' | 'EntropyMax' | 'LowFrequency' | 'BradfordLegacy';
-  applyBenfordLaw: boolean; 
-  gameCount: number; 
-  fixedNumbers: number[]; 
+  algorithmMode: 'Standard' | 'Bradford' | 'EntropyMax' | 'LowFrequency' | 'BradfordLegacy' | 'Wheeling';
+  applyBenfordLaw: boolean;
+  gameCount: number;
+  fixedNumbers: number[];
   excludedNumbers: number[];
+  wheelingPool: number[];
+  coOccurrenceMode: 'off' | 'favor' | 'avoid';
 }
 
 export interface ScientificAnalysisResult {
@@ -83,7 +85,8 @@ export interface ScientificAnalysisResult {
   };
   scientificReport: string;
   matchProbability: number;
-  historicalRank: number; 
+  historicalRank: number;
+  additionalSets?: number[][];
 }
 
 export interface NumberExplanation {

@@ -1,5 +1,6 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import KoreanLunarCalendar from 'korean-lunar-calendar';
 import { UserProfile, FortuneResult, SavedFortune, OrbState, CalendarType, ORB_DECORATIONS, GOLDEN_CARD_PRICE, OFFERING_CONVERSION_RATE, AnnualDestiny, ScientificAnalysisResult, ScientificFilterConfig, DAILY_LIMIT, COST_DIVINE, COST_SCIENCE, COST_ANNUAL, INITIAL_POINTS } from './types';
 import { getFortuneAndNumbers, getFixedDestinyNumbers } from './services/geminiService';
 import { getScientificRecommendation } from './services/scientificService';
@@ -17,7 +18,7 @@ import UserProfilePage from './components/UserProfilePage';
 import MysticAnalysisLab from './components/MysticAnalysisLab';
 
 // Firebase imports
-import { auth, db, loginWithGoogle, logout, loginAsGuest } from './services/firebase';
+import { auth, db, loginWithGoogle, logout } from './services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, deleteDoc, limit as fsLimit } from "firebase/firestore";
 
@@ -91,7 +92,29 @@ const App: React.FC = () => {
   const monthRef = useRef<HTMLInputElement>(null);
   const dayRef = useRef<HTMLInputElement>(null);
   const submitRef = useRef<HTMLButtonElement>(null);
-  
+
+  // 설정 폼용 음력 날짜 텍스트
+  const setupLunarText = useMemo(() => {
+    const y = parseInt(birthYear);
+    const m = parseInt(birthMonth);
+    const d = parseInt(birthDay);
+    if (!y || !m || !d || birthYear.length < 4) return null;
+    try {
+      const cal = new KoreanLunarCalendar();
+      if (calendarType === 'solar') {
+        if (!cal.setSolarDate(y, m, d)) return null;
+        const lunar = cal.getLunarCalendar();
+        const inter = lunar.intercalation ? ' (윤달)' : '';
+        return `음력 ${lunar.year}.${String(lunar.month).padStart(2, '0')}.${String(lunar.day).padStart(2, '0')}${inter}`;
+      } else {
+        // 음력 입력 → 대응하는 양력 표시
+        if (!cal.setLunarDate(y, m, d, isIntercalary)) return null;
+        const solar = cal.getSolarCalendar();
+        return `≈ 양력 ${solar.year}.${String(solar.month).padStart(2, '0')}.${String(solar.day).padStart(2, '0')}`;
+      }
+    } catch { return null; }
+  }, [birthYear, birthMonth, birthDay, calendarType, isIntercalary]);
+
   const [archives, setArchives] = useState<SavedFortune[]>([]);
   const [offeringData, setOfferingData] = useState<{amount: number, multiplier: number} | null>(null);
 
@@ -186,7 +209,6 @@ const App: React.FC = () => {
   };
 
   const handleGoogleLogin = async () => await loginWithGoogle();
-  const handleGuestLogin = async () => await loginAsGuest();
   const handleWithdrawAction = async () => { if (!currentUser) return; await logout(); setProfile(null); setView('main'); window.location.reload(); };
 
   // --- End Firebase Sync Logic ---
@@ -531,17 +553,7 @@ const App: React.FC = () => {
                   <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="google" />
                   <span>Google 계정으로 시작</span>
                 </button>
-                <div className="flex items-center space-x-4">
-                  <div className="flex-1 h-[1px] bg-white/5"></div>
-                  <span className="text-[10px] font-black text-slate-600 uppercase">OR</span>
-                  <div className="flex-1 h-[1px] bg-white/5"></div>
-                </div>
-                <button onClick={handleGuestLogin} className="w-full py-4 bg-slate-800 text-white font-black rounded-2xl shadow-xl flex items-center justify-center space-x-3 hover:bg-slate-700 transition-all active:scale-95 border border-white/5">
-                  <span className="text-lg">👤</span>
-                  <span>AI 스튜디오 프리뷰 모드 (익명)</span>
-                </button>
              </div>
-             <p className="text-[9px] text-slate-600 leading-relaxed">익명 로그인은 AI Studio 개발 환경에서 도메인 제약 없이 테스트하기 위한 용도입니다. 브라우저 쿠키를 삭제하면 데이터가 유실될 수 있습니다.</p>
           </div>
         </div>
       </div>
@@ -582,7 +594,10 @@ const App: React.FC = () => {
               </div>
               
               <div className="space-y-2 relative">
-                <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest px-1">Birth City (출생 도시)</label>
+                <div className="flex items-center justify-between px-1">
+                  <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Birth City (출생 도시)</label>
+                  <span className="text-[9px] font-bold text-sky-400">출생 도시를 모를 경우, 국가명을 입력하세요</span>
+                </div>
                 <div className="relative">
                   <input type="text" required value={inputCity} onChange={handleCityInputChange} className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-white focus:outline-none focus:border-indigo-500 font-bold pr-12" placeholder="도시 또는 국가명 입력" />
                   {isSearchingCity && <div className="absolute right-4 top-1/2 -translate-y-1/2"><div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div></div>}
@@ -596,6 +611,7 @@ const App: React.FC = () => {
                     ))}
                   </div>
                 )}
+                <p className="text-[10px] text-yellow-500 px-1 leading-relaxed">도시가 표시되지 않을 경우, 마지막 글자를 지우고 다시 입력하세요</p>
               </div>
 
               <div className="space-y-2">
@@ -610,7 +626,7 @@ const App: React.FC = () => {
                   {showTimePicker && (
                     <>
                       <div className="fixed inset-0 z-40 bg-transparent" onClick={() => setShowTimePicker(false)}></div>
-                      <div className="absolute bottom-[4.5rem] right-0 w-80 glass p-6 rounded-3xl z-50 border-indigo-500/30 shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-200 bg-slate-900/95">
+                      <div className="absolute bottom-[4.5rem] right-0 w-80 p-6 rounded-3xl z-50 border border-indigo-500/30 shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-200 bg-slate-900/90 backdrop-blur-sm">
                         {timePickerStep === 'ampm' && (
                           <div className="space-y-3">
                             <p className="text-[9px] font-black text-indigo-400 uppercase text-center mb-4 tracking-widest">Time Phase</p>
@@ -645,6 +661,9 @@ const App: React.FC = () => {
                     </>
                   )}
                 </div>
+                {setupLunarText && (
+                  <p className="text-[10px] text-yellow-400 font-bold px-1">{setupLunarText}</p>
+                )}
               </div>
             </div>
             <button ref={submitRef} type="submit" className="w-full py-6 bg-gradient-to-r from-indigo-600 to-pink-600 text-white font-black rounded-2xl shadow-2xl transition-all uppercase tracking-widest text-lg active:scale-95">운명의 문 열기</button>

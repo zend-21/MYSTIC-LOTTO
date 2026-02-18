@@ -14,8 +14,8 @@ const INITIAL_CONFIG: ScientificFilterConfig = {
   sum123Range: [30, 80],
   sum456Range: [80, 130],
   acMin: 7,
-  oddRatio: "",
-  highLowRatio: "",
+  oddRatio: "3:3",
+  highLowRatio: "3:3",
   primeCountRange: [1, 3],
   maxConsecutive: 1,
   maxSameEnding: 1,
@@ -26,7 +26,9 @@ const INITIAL_CONFIG: ScientificFilterConfig = {
   applyBenfordLaw: true,
   gameCount: 1,
   fixedNumbers: [],
-  excludedNumbers: []
+  excludedNumbers: [],
+  wheelingPool: [],
+  coOccurrenceMode: 'off',
 };
 
 const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result, onGenerate, lottoHistory }) => {
@@ -38,7 +40,10 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
   const [showPatternGuide, setShowPatternGuide] = useState(false);
   const [showRegressionGuide, setShowRegressionGuide] = useState(false);
   const [showEngineGuide, setShowEngineGuide] = useState(false);
-  const [showAdvancedWarning, setShowAdvancedWarning] = useState(false); // 입력 누락 모달 상태
+  const [showAdvancedWarning, setShowAdvancedWarning] = useState(false);
+  const [showWheelModal, setShowWheelModal] = useState(false);
+  const [showWheelingNotice, setShowWheelingNotice] = useState(false);
+  const [tempWheelPool, setTempWheelPool] = useState<number[]>([]);
   const [scanIndex, setScanIndex] = useState(0);
 
   // 고정수/제외수 UI 상태
@@ -107,9 +112,11 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
         case 'regression':
           newConfig.carryOverRange = [0, 2];
           newConfig.neighborRange = [0, 2];
+          newConfig.coOccurrenceMode = 'off';
           break;
         case 'algo':
           newConfig.algorithmMode = INITIAL_CONFIG.algorithmMode;
+          newConfig.wheelingPool = [];
           break;
       }
       return newConfig;
@@ -117,6 +124,10 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
   };
 
   const handleGenerateClick = () => {
+    if (config.algorithmMode === 'Wheeling' && config.wheelingPool.length < 7) {
+      setShowWheelModal(true);
+      return;
+    }
     if (useAdvanced) {
       const f1 = parseInt(fix1);
       const f2 = parseInt(fix2);
@@ -334,6 +345,35 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                     로또 당첨 결과에서 3개 이상의 연번이나 3개 이상의 동끝수가 나올 확률은 매우 낮습니다. 이를 <strong className="text-white">1개 이하</strong>로 제한함으로써, 번호가 용지 전체에 골고루 분포되도록 유도하여 밸런스 있는 최적의 조합을 생성합니다.
                   </p>
                 </div>
+
+                <div className="p-8 bg-cyan-500/5 rounded-[2rem] border border-cyan-500/20 space-y-4">
+                  <h4 className="text-cyan-400 font-black text-lg">4. 홀짝 비율 (Odd/Even Ratio)</h4>
+                  <div className="text-slate-300 text-sm leading-relaxed space-y-3">
+                    <p>6개 번호 중 홀수와 짝수의 비율을 제어합니다. 역대 당첨 통계에서 <strong className="text-white">3:3 조합이 약 33%</strong>로 가장 자주 등장하며, 이어서 4:2와 2:4가 각각 약 23%로 높은 빈도를 보입니다.</p>
+                    <ul className="list-disc pl-5 space-y-2">
+                      <li><strong className="text-white">3:3</strong> — 역대 최다 출현. 균형 전략의 기본값으로 가장 안정적입니다.</li>
+                      <li><strong className="text-white">4:2 / 2:4</strong> — 홀수 혹은 짝수가 약간 우세한 구간. 실전에서 자주 쓰이는 준균형 전략입니다.</li>
+                      <li><strong className="text-white">5:1 / 1:5</strong> — 한쪽이 극단적으로 많은 구간. 출현 빈도가 낮아 변칙 도박 전략으로 분류됩니다.</li>
+                      <li><strong className="text-white">비활성화 (공란)</strong> — 비율 제한 없이 다른 필터만 적용합니다.</li>
+                    </ul>
+                    <p className="italic text-[11px] text-cyan-500">"가장 무난한 선택은 3:3입니다. 확률에 기반한 기본 전략을 원한다면 이 값을 유지하세요."</p>
+                  </div>
+                </div>
+
+                <div className="p-8 bg-cyan-500/5 rounded-[2rem] border border-cyan-500/20 space-y-4">
+                  <h4 className="text-cyan-400 font-black text-lg">5. 고저 비율 (High/Low Ratio)</h4>
+                  <div className="text-slate-300 text-sm leading-relaxed space-y-3">
+                    <p>6개 번호를 <strong className="text-white">고번호(23~45)</strong>와 <strong className="text-white">저번호(1~22)</strong>로 나눈 비율을 제어합니다. 역대 통계에서 <strong className="text-white">3:3이 약 30%</strong>로 선두이며, 4:2와 2:4가 뒤를 잇습니다.</p>
+                    <ul className="list-disc pl-5 space-y-2">
+                      <li><strong className="text-white">3:3</strong> — 고른 숫자 대역. 번호가 용지 위아래에 균형 있게 배치됩니다.</li>
+                      <li><strong className="text-white">4:2</strong> — 고번호 우세. 최근 큰 번호가 많이 나오는 흐름일 때 유효합니다.</li>
+                      <li><strong className="text-white">2:4</strong> — 저번호 우세. 최근 작은 번호가 주로 나올 때 유효합니다.</li>
+                      <li><strong className="text-white">5:1 / 1:5</strong> — 극단적 편향. 변칙 전략으로, 빈도가 낮은 만큼 적중 시 희소가치가 있습니다.</li>
+                      <li><strong className="text-white">비활성화 (공란)</strong> — 비율 제한 없이 다른 필터만 적용합니다.</li>
+                    </ul>
+                    <p className="italic text-[11px] text-cyan-500">"홀짝과 마찬가지로 3:3이 기본 권장값입니다. 최근 당첨 번호의 고저 흐름을 참고해 전략적으로 조정해 보세요."</p>
+                  </div>
+                </div>
               </div>
               <button onClick={() => setShowPatternGuide(false)} className="w-full py-5 bg-cyan-600 text-slate-950 font-black rounded-2xl text-xs uppercase tracking-widest hover:bg-cyan-500 transition-all">패턴 가이드 숙지 완료</button>
            </div>
@@ -361,6 +401,25 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                   <div className="text-slate-300 text-sm leading-relaxed space-y-2">
                     <p>전회차 당첨 번호의 바로 옆 숫자(±1)를 포함합니다. 숫자의 흐름이 한 곳에 머물거나 근처로 이동하는 경향을 포착합니다.</p>
                     <p className="italic text-[11px] text-emerald-500">"번호가 옆으로 살짝 비껴가는 흐름을 잡고 싶다면 1~2개를 설정하십시오."</p>
+                  </div>
+                </div>
+
+                <div className="p-8 bg-emerald-500/5 rounded-[2rem] border border-emerald-500/20 space-y-4">
+                  <h4 className="text-emerald-400 font-black text-lg">3. 동반 출현 필터 (Co-occurrence)</h4>
+                  <div className="text-slate-300 text-sm leading-relaxed space-y-3">
+                    <p>역대 모든 당첨 회차 데이터를 분석해 <strong className="text-white">어떤 번호 쌍이 얼마나 자주 함께 출현했는지</strong>를 계산합니다. 6개 번호에는 총 15개의 쌍(Pair)이 존재하며, 이 필터는 그 쌍들의 역대 평균 동반 빈도를 기준으로 조합을 평가합니다.</p>
+                    <ul className="list-disc pl-5 space-y-2">
+                      <li>
+                        <strong className="text-white">동반 선호 (Favor)</strong> — 역대 기록에서 자주 함께 나온 번호 쌍이 많은 조합을 선호합니다. <span className="text-emerald-400">흐름을 따라가는 순응 전략</span>으로, 역사적으로 검증된 번호 쌍들을 집중적으로 공략합니다.
+                      </li>
+                      <li>
+                        <strong className="text-white">동반 기피 (Avoid)</strong> — 지금까지 함께 나온 적이 드문 번호 쌍 위주의 조합을 선호합니다. <span className="text-rose-400">반전을 노리는 역발상 전략</span>으로, 아직 실현되지 않은 조합에서 잭팟을 기대합니다.
+                      </li>
+                      <li>
+                        <strong className="text-white">비활성 (Off)</strong> — 동반 출현 빈도를 분석하지 않고 다른 필터만 적용합니다.
+                      </li>
+                    </ul>
+                    <p className="italic text-[11px] text-emerald-500">"기본값은 비활성입니다. 특정 전략적 관점이 있을 때만 켜는 것을 권장합니다."</p>
                   </div>
                 </div>
               </div>
@@ -398,9 +457,111 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                   <p className="text-indigo-400 font-black text-sm uppercase">Cold Number Recall (저빈도형)</p>
                   <p className="text-slate-400 text-sm leading-relaxed">최근 10주 이상 나오지 않은 '가장 차가운 숫자'들 중에서 반등 가능성이 높은 번호를 추려냅니다.</p>
                 </div>
+                <div className="p-6 bg-indigo-500/5 border border-indigo-500/20 rounded-[2rem] space-y-3">
+                  <p className="text-indigo-400 font-black text-sm uppercase">Wheeling System (휠링 시스템)</p>
+                  <p className="text-slate-400 text-sm leading-relaxed">Wheeling은 <strong className="text-indigo-300">「사실상 번호 예측 능력에 베팅하는 구조」</strong>입니다. 번호를 랜덤으로 넣으면 의미가 없고, 최근 통계나 개인적 확신이 있는 번호들을 풀로 구성해야 의도대로 작동합니다. 7~12개의 풀 번호를 직접 선택하면, 해당 풀에서 가능한 모든 6번호 조합을 분석하여 <strong className="text-indigo-300">서로 겹치는 숫자 쌍(페어)을 최소한으로 남기면서 커버리지를 극대화하는 조합들</strong>을 그리디 알고리즘으로 추려냅니다. N개의 풀을 선택하면 최대 N장의 티켓이 생성됩니다. 특정 번호에 강한 확신이 있을 때 그 번호들을 풀에 포함시켜 '집중 전략'으로 활용하는 것이 가장 효과적입니다.</p>
+                </div>
               </div>
               <button onClick={() => setShowEngineGuide(false)} className="w-full py-5 bg-indigo-600 text-slate-950 font-black rounded-2xl text-xs uppercase tracking-widest hover:bg-indigo-500 transition-all">엔진 가이드 숙지 완료</button>
            </div>
+        </div>
+      )}
+
+      {/* Wheeling 모드 안내 모달 */}
+      {showWheelingNotice && (
+        <div className="fixed inset-0 z-[9600] flex items-center justify-center p-6 bg-black/95 backdrop-blur-3xl animate-in fade-in duration-300">
+          <div className="glass p-10 rounded-[3rem] border border-amber-500/30 w-full max-w-md shadow-[0_0_80px_rgba(245,158,11,0.15)] space-y-8 text-center">
+            <div className="space-y-3">
+              <div className="text-4xl">⚠</div>
+              <h3 className="text-xl font-black text-amber-400 uppercase tracking-widest">Wheeling 모드 안내</h3>
+            </div>
+            <p className="text-slate-300 text-sm leading-relaxed">
+              Wheeling 모드를 적용하면 <strong className="text-white">합계 · 패턴 · 회귀 섹션에서의 설정값은 모두 적용되지 않습니다.</strong><br/><br/>
+              번호 풀을 직접 선택해 페어 커버리지를 극대화하는 방식으로만 동작합니다.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowWheelingNotice(false)}
+                className="flex-1 py-4 rounded-2xl border border-slate-700 text-slate-400 text-xs font-black hover:border-slate-600 transition-all"
+              >취소</button>
+              <button
+                onClick={() => { updateConfig('algorithmMode', 'Wheeling'); setShowWheelingNotice(false); }}
+                className="flex-1 py-4 rounded-2xl bg-amber-500 text-slate-950 text-xs font-black hover:bg-amber-400 transition-all"
+              >Wheeling 모드 적용</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Wheeling 풀 번호 선택 모달 */}
+      {showWheelModal && (
+        <div className="fixed inset-0 z-[9500] flex items-center justify-center p-6 bg-black/95 backdrop-blur-3xl animate-in fade-in duration-300">
+          <div className="flex flex-col items-center space-y-5 w-full max-w-sm">
+            {/* 헤더 */}
+            <div className="flex items-center justify-between w-full">
+              <div>
+                <h3 className="text-base font-black text-white uppercase tracking-widest">풀 번호 선택</h3>
+                <p className="text-[10px] text-slate-500 font-bold mt-0.5">7~12개 선택 후 확인</p>
+              </div>
+              <div className={`px-3 py-1.5 rounded-full text-[11px] font-black border ${tempWheelPool.length >= 7 && tempWheelPool.length <= 12 ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-400' : 'border-slate-700 text-slate-500'}`}>
+                {tempWheelPool.length}개 선택
+              </div>
+            </div>
+
+            {/* 복권 용지 그리드 */}
+            <div className="w-full border-2 border-red-900/60 rounded-2xl overflow-hidden shadow-[0_0_40px_rgba(220,38,38,0.15)]">
+              {/* 복권 용지 헤더 */}
+              <div className="bg-red-900/70 py-2 text-center border-b border-red-800/60">
+                <p className="text-[10px] font-black text-red-200/80 tracking-[0.3em] uppercase">Wheeling Pool</p>
+              </div>
+              {/* 격자 */}
+              <div className="grid grid-cols-7 gap-px bg-red-900/40">
+                {Array.from({ length: 45 }, (_, i) => i + 1).map(n => {
+                  const isSelected = tempWheelPool.includes(n);
+                  const isDisabled = !isSelected && tempWheelPool.length >= 12;
+                  return (
+                    <button
+                      key={n}
+                      disabled={isDisabled}
+                      onClick={() => setTempWheelPool(prev =>
+                        prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n].sort((a, b) => a - b)
+                      )}
+                      className={`aspect-[3/4] flex items-center justify-center bg-slate-950 transition-colors
+                        ${isDisabled ? 'cursor-not-allowed' : 'hover:bg-slate-900'}
+                      `}
+                    >
+                      <div className={`w-[78%] h-[72%] rounded-full flex items-center justify-center text-[11px] font-black transition-all
+                        ${isSelected
+                          ? 'bg-cyan-500 text-slate-950 shadow-[0_0_10px_rgba(6,182,212,0.5)]'
+                          : isDisabled
+                          ? 'bg-slate-800/30 text-slate-700'
+                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white'}
+                      `}>
+                        {n}
+                      </div>
+                    </button>
+                  );
+                })}
+                {/* 마지막 행 빈 셀 4개 */}
+                {[0,1,2,3].map(k => (
+                  <div key={`e${k}`} className="aspect-[3/4] bg-slate-950" />
+                ))}
+              </div>
+            </div>
+
+            {/* 버튼 */}
+            <div className="flex gap-3 w-full">
+              <button
+                onClick={() => setShowWheelModal(false)}
+                className="flex-1 py-4 rounded-2xl border border-slate-700 text-slate-400 text-xs font-black hover:border-slate-600 transition-all"
+              >취소</button>
+              <button
+                disabled={tempWheelPool.length < 7 || tempWheelPool.length > 12}
+                onClick={() => { updateConfig('wheelingPool', tempWheelPool); setShowWheelModal(false); }}
+                className="flex-1 py-4 rounded-2xl bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 disabled:text-slate-600 text-slate-950 text-xs font-black transition-all"
+              >확인 ({tempWheelPool.length}개)</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -431,7 +592,7 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                 <button 
                   key={tab.id}
                   onClick={() => setActiveSection(tab.id as any)}
-                  className={`flex-1 py-4 rounded-[1.5rem] text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center space-x-2 ${activeSection === tab.id ? 'bg-cyan-600 text-slate-950 shadow-[0_0_20px_rgba(6,182,212,0.3)]' : 'text-slate-500 hover:text-cyan-400'}`}
+                  className={`flex-1 py-4 rounded-[1.5rem] text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center space-x-2 ${activeSection === tab.id ? 'bg-cyan-600 text-slate-950 shadow-[0_0_20px_rgba(6,182,212,0.3)]' : 'text-slate-500 hover:text-cyan-400'} ${config.algorithmMode === 'Wheeling' && tab.id !== 'algo' ? 'opacity-30' : ''}`}
                 >
                   <span className="text-sm">{tab.icon}</span>
                   <span className="hidden sm:inline">{tab.label}</span>
@@ -659,6 +820,34 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                          </div>
                          <input type="range" min="0" max="3" value={config.neighborRange[1]} onChange={e => updateConfig('neighborRange', [0, parseInt(e.target.value)])} className="w-full accent-cyan-500 bg-slate-800 rounded-lg appearance-none h-2" />
                       </div>
+                      <div className="space-y-4 pt-2">
+                        <div className="flex justify-between text-[11px] font-black text-slate-500 uppercase tracking-widest">
+                          <span>동반 출현 필터 (Co-occurrence)</span>
+                          <span className={`text-base font-black ${config.coOccurrenceMode === 'off' ? 'text-slate-600' : config.coOccurrenceMode === 'favor' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {config.coOccurrenceMode === 'off' ? '비활성' : config.coOccurrenceMode === 'favor' ? '동반 선호' : '동반 기피'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {([['off', '비활성'], ['favor', '동반 선호'], ['avoid', '동반 기피']] as const).map(([mode, label]) => (
+                            <button
+                              key={mode}
+                              onClick={() => updateConfig('coOccurrenceMode', mode)}
+                              className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                                config.coOccurrenceMode === mode
+                                  ? mode === 'off' ? 'bg-slate-700 text-white border border-slate-600'
+                                    : mode === 'favor' ? 'bg-emerald-600 text-slate-950'
+                                    : 'bg-rose-600 text-white'
+                                  : 'bg-slate-900 text-slate-500 border border-slate-800 hover:border-slate-700'
+                              }`}
+                            >{label}</button>
+                          ))}
+                        </div>
+                        <p className="text-[10px] text-slate-600 leading-relaxed">
+                          {config.coOccurrenceMode === 'off' && '역대 데이터에서 함께 출현한 번호 쌍 빈도를 분석하지 않습니다.'}
+                          {config.coOccurrenceMode === 'favor' && '역대 당첨 기록에서 자주 함께 나온 번호 쌍이 많은 조합을 선호합니다.'}
+                          {config.coOccurrenceMode === 'avoid' && '역대 당첨 기록에서 함께 나온 적 없거나 드문 번호 쌍 위주의 조합을 선호합니다.'}
+                        </p>
+                      </div>
                    </div>
                 </div>
               )}
@@ -671,9 +860,10 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                       { id: 'BradfordLegacy', name: 'Bradford Legacy Engine', desc: '영국 브래드포드 대학 실화 그물망 전략', isRecommended: true },
                       { id: 'Bradford', name: 'Balanced Coverage Engine', desc: '균형 잡힌 데이터 커버리지 모델' },
                       { id: 'EntropyMax', name: 'Entropy Maximizer v2', desc: '무작위성 분포를 극대화하는 모델' },
-                      { id: 'LowFrequency', name: 'Cold Number Recall', desc: '미출현 저빈도수 분석 모델' }
+                      { id: 'LowFrequency', name: 'Cold Number Recall', desc: '미출현 저빈도수 분석 모델' },
+                      { id: 'Wheeling', name: 'Wheeling System', desc: '선택한 풀에서 페어 커버리지 극대화' }
                     ].map(algo => (
-                      <button key={algo.id} onClick={() => updateConfig('algorithmMode', algo.id as any)} className={`p-4 rounded-2xl border-2 text-left transition-all relative overflow-hidden ${config.algorithmMode === algo.id ? 'border-cyan-500 bg-cyan-500/10 shadow-lg' : 'border-slate-800 bg-slate-900/40 hover:border-slate-700'}`}>
+                      <button key={algo.id} onClick={() => algo.id === 'Wheeling' && config.algorithmMode !== 'Wheeling' ? setShowWheelingNotice(true) : updateConfig('algorithmMode', algo.id as any)} className={`p-4 rounded-2xl border-2 text-left transition-all relative overflow-hidden ${config.algorithmMode === algo.id ? 'border-cyan-500 bg-cyan-500/10 shadow-lg' : 'border-slate-800 bg-slate-900/40 hover:border-slate-700'}`}>
                         {algo.isRecommended && (
                           <div className="absolute top-0 right-0 bg-amber-500 text-slate-950 text-[8px] font-black px-2.5 py-0.5 rounded-bl-lg uppercase tracking-tighter z-10 animate-pulse border-b border-l border-amber-400/50">추천</div>
                         )}
@@ -682,21 +872,50 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                       </button>
                     ))}
                   </div>
+
+                  {/* Wheeling 풀 설정 버튼 */}
+                  {config.algorithmMode === 'Wheeling' && (
+                    <div className="p-4 bg-cyan-500/5 border border-cyan-500/20 rounded-2xl space-y-3">
+                      <p className="text-[9px] font-black text-cyan-400 uppercase tracking-widest">풀 번호 설정 (7~12개 선택)</p>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => { setTempWheelPool([...config.wheelingPool]); setShowWheelModal(true); }}
+                          className="flex-1 py-3 rounded-xl border border-cyan-500/40 bg-cyan-500/10 text-cyan-400 text-[10px] font-black hover:bg-cyan-500/20 transition-all"
+                        >
+                          {config.wheelingPool.length >= 7 ? `${config.wheelingPool.length}개 선택됨 — 수정` : '번호 선택하기'}
+                        </button>
+                        {config.wheelingPool.length >= 7 && (
+                          <div className="flex gap-1 flex-wrap">
+                            {config.wheelingPool.map(n => (
+                              <span key={n} className="w-7 h-7 rounded-lg bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center text-[9px] font-black text-cyan-300">{n}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      {config.wheelingPool.length >= 7 && (
+                        <p className="text-[9px] text-slate-500 font-bold">{config.wheelingPool.length}개 풀 → {config.wheelingPool.length}장 티켓 생성 예정</p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
 
             {/* 고정수 및 제외수 선택 (탭 무관 고정) */}
-            <div className="pt-6 border-t border-white/10 space-y-4">
+            <div className={`pt-6 border-t border-white/10 space-y-4 transition-opacity ${(config.algorithmMode === 'Wheeling' || config.algorithmMode === 'BradfordLegacy') ? 'opacity-30 pointer-events-none' : ''}`}>
               <div className="flex items-center space-x-3 px-1">
-                <input 
-                  type="checkbox" 
-                  id="advanced-mode" 
-                  checked={useAdvanced} 
+                <input
+                  type="checkbox"
+                  id="advanced-mode"
+                  checked={useAdvanced}
                   onChange={e => setUseAdvanced(e.target.checked)}
-                  className="w-4 h-4 rounded border-slate-700 bg-slate-900 accent-cyan-500 cursor-pointer" 
+                  disabled={config.algorithmMode === 'Wheeling' || config.algorithmMode === 'BradfordLegacy'}
+                  className="w-4 h-4 rounded border-slate-700 bg-slate-900 accent-cyan-500 cursor-pointer disabled:cursor-not-allowed"
                 />
                 <label htmlFor="advanced-mode" className="text-xs font-black text-cyan-400 uppercase tracking-widest cursor-pointer select-none">고정수 or 제외수 선택</label>
+                {(config.algorithmMode === 'Wheeling' || config.algorithmMode === 'BradfordLegacy') && (
+                  <span className="text-[9px] text-slate-600 font-black uppercase tracking-widest">— 현재 모드에서 미적용</span>
+                )}
               </div>
 
               {useAdvanced && (
@@ -719,9 +938,18 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
               )}
             </div>
 
-            <button onClick={handleGenerateClick} disabled={loading} className="w-full py-7 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 text-slate-950 font-black rounded-[2rem] transition-all shadow-xl uppercase tracking-[0.4em] active:scale-95">
+            <button
+              onClick={handleGenerateClick}
+              disabled={loading || (config.algorithmMode === 'Wheeling' && config.wheelingPool.length < 7)}
+              className="w-full py-7 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 disabled:cursor-not-allowed text-slate-950 disabled:text-slate-500 font-black rounded-[2rem] transition-all shadow-xl uppercase tracking-[0.4em] active:scale-95"
+            >
               {loading ? (
                 <span className="text-xl">연산 중...</span>
+              ) : config.algorithmMode === 'Wheeling' && config.wheelingPool.length < 7 ? (
+                <div className="flex flex-col items-center">
+                  <span className="text-xl">풀 번호 미설정</span>
+                  <span className="text-xs mt-1 font-bold tracking-widest">엔진 탭에서 Wheeling 풀 번호를 먼저 선택하세요</span>
+                </div>
               ) : (
                 <div className="flex flex-col items-center">
                   <span className="text-xl">정밀 분석 및 번호 추출</span>
@@ -743,13 +971,42 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
             </div>
           ) : result ? (
             <div className="space-y-10 animate-in zoom-in-95 duration-1000">
-              <div className="glass p-8 rounded-[3rem] border border-cyan-500/10 shadow-xl flex items-center justify-center gap-4 group hover:border-cyan-500/30 transition-all">
-                {result.numbers.map((num, i) => (
-                  <div key={i} className="w-14 h-14 rounded-2xl bg-slate-800 border border-white/5 flex items-center justify-center text-2xl font-black text-white shadow-lg group-hover:scale-105 transition-transform">
-                    {num}
-                  </div>
-                ))}
+              {/* 메인 세트 */}
+              <div className="space-y-2">
+                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">
+                  {result.additionalSets ? `Game #1 (대표 번호)` : '추출 번호'}
+                </p>
+                <div className="glass p-8 rounded-[3rem] border border-cyan-500/10 shadow-xl flex items-center justify-center gap-4 group hover:border-cyan-500/30 transition-all">
+                  {result.numbers.map((num, i) => (
+                    <div key={i} className="w-14 h-14 rounded-2xl bg-slate-800 border border-white/5 flex items-center justify-center text-2xl font-black text-white shadow-lg group-hover:scale-105 transition-transform">
+                      {num}
+                    </div>
+                  ))}
+                </div>
               </div>
+
+              {/* 추가 게임 세트 (Bradford Legacy / Wheeling) */}
+              {result.additionalSets && result.additionalSets.length > 0 && (
+                <div className="space-y-3">
+                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">
+                    Additional Games ({result.additionalSets.length}개)
+                  </p>
+                  <div className="space-y-2">
+                    {result.additionalSets.map((set, si) => (
+                      <div key={si} className="glass px-6 py-4 rounded-2xl border border-white/5 flex items-center gap-4">
+                        <span className="text-[9px] font-black text-slate-600 w-10 shrink-0">#{si + 2}</span>
+                        <div className="flex gap-2 flex-wrap">
+                          {set.map((num, ni) => (
+                            <div key={ni} className="w-9 h-9 rounded-xl bg-slate-800 border border-white/5 flex items-center justify-center text-sm font-black text-white">
+                              {num}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[

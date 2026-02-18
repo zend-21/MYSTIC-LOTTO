@@ -11,6 +11,7 @@
   "dependencies": {
     "@google/genai": "^1.41.0",
     "firebase": "^12.9.0",
+    "korean-lunar-calendar": "^0.3.6",
     "lottie-web": "5.12.2",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"

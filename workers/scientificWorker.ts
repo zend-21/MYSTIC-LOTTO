@@ -184,6 +184,89 @@ const runColdNumberSimulation = (fixed: number[], excluded: number[], history: L
   return result.sort((a, b) => a - b);
 };
 
+// ─── Wheeling System: 페어 커버리지 극대화 조합 생성 ────────────────────────
+const generateAllCombinations = (pool: number[], r: number): number[][] => {
+  const result: number[][] = [];
+  const combo: number[] = [];
+  const recurse = (start: number) => {
+    if (combo.length === r) { result.push([...combo]); return; }
+    for (let i = start; i < pool.length; i++) {
+      combo.push(pool[i]); recurse(i + 1); combo.pop();
+    }
+  };
+  recurse(0);
+  return result;
+};
+
+const runWheelSimulation = (pool: number[]): number[][] => {
+  if (pool.length < 6) return [];
+  if (pool.length === 6) return [[...pool].sort((a, b) => a - b)];
+
+  const allCombos = generateAllCombinations(pool, 6);
+  const targetCount = pool.length; // N개 풀 → N장 티켓
+
+  if (allCombos.length <= targetCount) {
+    return allCombos.map(c => [...c].sort((a, b) => a - b));
+  }
+
+  // 그리디 페어 커버리지: 미커버 페어를 가장 많이 포함하는 조합 우선 선택
+  const uncoveredPairs = new Set<string>();
+  for (let i = 0; i < pool.length; i++)
+    for (let j = i + 1; j < pool.length; j++)
+      uncoveredPairs.add(`${pool[i]},${pool[j]}`);
+
+  const selected: number[][] = [];
+  const remaining = allCombos.map(c => [...c].sort((a, b) => a - b));
+
+  while (selected.length < targetCount && remaining.length > 0) {
+    let bestIdx = 0, bestCoverage = -1;
+    for (let i = 0; i < remaining.length; i++) {
+      const combo = remaining[i];
+      let coverage = 0;
+      for (let a = 0; a < combo.length; a++)
+        for (let b = a + 1; b < combo.length; b++)
+          if (uncoveredPairs.has(`${combo[a]},${combo[b]}`)) coverage++;
+      if (coverage > bestCoverage) { bestCoverage = coverage; bestIdx = i; }
+    }
+    const best = remaining[bestIdx];
+    selected.push(best);
+    remaining.splice(bestIdx, 1);
+    for (let a = 0; a < best.length; a++)
+      for (let b = a + 1; b < best.length; b++)
+        uncoveredPairs.delete(`${best[a]},${best[b]}`);
+  }
+  return selected;
+};
+
+// ─── Co-occurrence 테이블 빌더 & 스코어러 ────────────────────────────────────
+const buildCoOccurrenceTable = (history: LottoRound[]): { table: Map<string, number>; avg: number } => {
+  const table = new Map<string, number>();
+  for (const round of history) {
+    const sorted = [...round.numbers].sort((a, b) => a - b);
+    for (let i = 0; i < sorted.length; i++) {
+      for (let j = i + 1; j < sorted.length; j++) {
+        const key = `${sorted[i]},${sorted[j]}`;
+        table.set(key, (table.get(key) ?? 0) + 1);
+      }
+    }
+  }
+  const vals = [...table.values()];
+  const avg = vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+  return { table, avg };
+};
+
+const countHotPairs = (numbers: number[], table: Map<string, number>, avg: number): number => {
+  const sorted = [...numbers].sort((a, b) => a - b);
+  let hot = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    for (let j = i + 1; j < sorted.length; j++) {
+      const freq = table.get(`${sorted[i]},${sorted[j]}`) ?? 0;
+      if (freq >= avg) hot++;
+    }
+  }
+  return hot; // C(6,2) = 15쌍 중 평균 이상인 쌍 수
+};
+
 // ─── 메인 루프 ───────────────────────────────────────────────────────────────
 self.onmessage = (e: MessageEvent) => {
   const { config, liveHistory, historicalDist, lastRoundNumbers } = e.data as {
@@ -193,11 +276,18 @@ self.onmessage = (e: MessageEvent) => {
     lastRoundNumbers: number[];
   };
 
+  const { table: coOccTable, avg: coOccAvg } = buildCoOccurrenceTable(liveHistory);
+
   let candidate: number[] = [];
   let metrics: ReturnType<typeof calculateFullMetrics> | null = null;
   let bradfordSets: number[][] = [];
 
-  if (config.algorithmMode === 'BradfordLegacy') {
+  if (config.algorithmMode === 'Wheeling') {
+    const wheelSets = runWheelSimulation(config.wheelingPool);
+    candidate = wheelSets[0] ?? [];
+    bradfordSets = wheelSets;
+    metrics = calculateFullMetrics(candidate, lastRoundNumbers, historicalDist);
+  } else if (config.algorithmMode === 'BradfordLegacy') {
     bradfordSets = generateBradfordFullSet(config.excludedNumbers);
     candidate = bradfordSets[0];
     metrics = calculateFullMetrics(candidate, lastRoundNumbers, historicalDist);
@@ -235,10 +325,16 @@ self.onmessage = (e: MessageEvent) => {
       const checkGap       = metrics.minGap >= config.gapMin;
       const checkCarryOver = metrics.carryOverCount >= config.carryOverRange[0] && metrics.carryOverCount <= config.carryOverRange[1];
       const checkNeighbor  = metrics.neighborCount >= config.neighborRange[0] && metrics.neighborCount <= config.neighborRange[1];
+      let   checkCoOcc     = true;
+      if (config.coOccurrenceMode !== 'off') {
+        const hotPairs = countHotPairs(candidate, coOccTable, coOccAvg);
+        if (config.coOccurrenceMode === 'favor') checkCoOcc = hotPairs >= 8;
+        else                                     checkCoOcc = hotPairs <= 7;
+      }
 
       const allPass = checkSum && checkSum123 && checkSum456 && checkAC && checkBenford &&
         checkOdd && checkHighLow && checkPrime && checkConsec &&
-        checkEnding && checkGap && checkCarryOver && checkNeighbor;
+        checkEnding && checkGap && checkCarryOver && checkNeighbor && checkCoOcc;
 
       if (allPass) {
         if (config.algorithmMode !== 'EntropyMax') break;

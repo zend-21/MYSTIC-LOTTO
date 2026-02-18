@@ -93,6 +93,7 @@ export const getScientificRecommendation = async (config: ScientificFilterConfig
   else if (config.algorithmMode === 'Bradford')       engineLabel = "Balanced Coverage Engine (Spatial Balance)";
   else if (config.algorithmMode === 'EntropyMax')     engineLabel = "Entropy Maximizer Engine (AC Optimization)";
   else if (config.algorithmMode === 'LowFrequency')   engineLabel = "Cold Number Recall Engine (Frequency Weighting)";
+  else if (config.algorithmMode === 'Wheeling')       engineLabel = "Wheeling System Engine (Pair Coverage)";
   else                                                engineLabel = "Standard Random Engine";
 
   // 4. Gemini AI 리포트 — Firebase Function (메인 스레드)
@@ -105,5 +106,6 @@ export const getScientificRecommendation = async (config: ScientificFilterConfig
     scientificReport: result.data.finalReport,
     matchProbability,
     historicalRank,
+    additionalSets: bradfordSets.length > 1 ? bradfordSets.slice(1) : undefined,
   };
 };
