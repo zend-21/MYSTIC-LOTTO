@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getR2UploadUrl = exports.cleanupExpiredRooms = exports.spendPoints = exports.getFixedDestinyNumbers = exports.getScientificReport = exports.getFortuneAndNumbers = void 0;
+exports.getR2UploadUrl = exports.checkModelAvailability = exports.cleanupExpiredRooms = exports.spendPoints = exports.getFixedDestinyNumbers = exports.getScientificReport = exports.getFortuneAndNumbers = void 0;
 const admin = require("firebase-admin");
 const https_1 = require("firebase-functions/v2/https");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -22,6 +22,26 @@ const COST_DIVINE = 1000;
 const COST_SCIENCE = 1000;
 const COST_ANNUAL = 50000;
 const ADMIN_UID = "o5XegbLlnPVJhZtn31HXyddBGKW2";
+// ── 모델 폴백 체인 ────────────────────────────────────────────
+// Flash 계열: 1,000 루멘 서비스용
+const FLASH_CHAIN = ["gemini-3-flash-preview", "gemini-2.5-flash"];
+// Pro 계열: 50,000 루멘 프리미엄 서비스용
+const PRO_CHAIN = ["gemini-3-pro-preview", "gemini-2.5-pro"];
+// ── Firestore에서 현재 활성 모델명 조회 ──────────────────────
+async function getActiveModel(tier) {
+    var _a, _b;
+    const defaults = {
+        flash: FLASH_CHAIN[0],
+        pro: PRO_CHAIN[0],
+    };
+    try {
+        const snap = await db.collection("config").doc("models").get();
+        return (_b = (_a = snap.data()) === null || _a === void 0 ? void 0 : _a[tier]) !== null && _b !== void 0 ? _b : defaults[tier];
+    }
+    catch (_c) {
+        return defaults[tier];
+    }
+}
 // ── 포인트 차감 헬퍼 (트랜잭션 내부에서 사용) ──────────────────
 async function deductPoints(uid, amount, tx) {
     var _a, _b, _c;
@@ -107,8 +127,9 @@ exports.getFortuneAndNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], 
     8. 'coreNumbersDescription': 핵심 숫자 2개의 선정 이유를 사주/타로/점성술 관점에서 통합 설명.
     9. 'recommendationReason': 오늘 하루 전체를 관통하는 운명의 핵심 전언.
   `;
+    const flashModel = await getActiveModel("flash");
     const response = await callWithRetry(() => ai.models.generateContent({
-        model: "gemini-3-pro-preview",
+        model: flashModel,
         contents: prompt,
         config: {
             responseMimeType: "application/json",
@@ -206,12 +227,12 @@ exports.getScientificReport = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], r
       분석 리포트 가이드라인:
       1. 엔진 설명 — ${engineContext}
       2. 벤포드 적합도(${metrics.benfordScore}점)가 주는 통계적 정합성과 산술 복잡도(AC) ${metrics.acValue}의 신뢰성을 전문적으로 설명하세요.
-      3. "미스틱 로또 연구실 AI 분석팀"으로 마무리하고 면책 조항을 포함하세요.
-      3. 정규분포 Z-Score(${metrics.sumZScore}σ)를 언급하며, 이 조합의 합계가 통계적 평균(138)에서 얼마나 벗어나 있는지(안정적인지 혹은 변동성이 큰지) 평가하세요.
+      3. 정규분포 Z-Score(${metrics.sumZScore}σ)를 언급하며, 이 조합의 합계(${metrics.sum})가 통계적 평균(138)에서 얼마나 벗어나 있는지(안정적인지 혹은 변동성이 큰지) 평가하세요. 분포 균일도(${metrics.chiSquaredScore}점)도 함께 서술하여 번호가 5개 구간에 얼마나 고르게 분포하는지 분석하세요.
       4. "미스틱 로또 연구실 AI 분석팀"으로 마무리하고 면책 조항을 포함하세요.
     `;
+    const flashModel = await getActiveModel("flash");
     const response = await callWithRetry(() => ai.models.generateContent({
-        model: "gemini-3-pro-preview",
+        model: flashModel,
         contents: prompt,
     }));
     let finalReport = response.text || "지성 분석 결과를 도출하지 못했습니다.";
@@ -276,8 +297,9 @@ exports.getFixedDestinyNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY]
     - 'astrologyDetailed': 목성과 토성의 이동, 사용자 하우스의 변화를 포함한 점성학적 연간 트랜짓 리포트.
     - 'sajuDeepDive': 음력 설 기준 세운 분석.
   `;
+    const proModel = await getActiveModel("pro");
     const response = await callWithRetry(() => ai.models.generateContent({
-        model: "gemini-3-pro-preview",
+        model: proModel,
         contents: prompt,
         config: {
             responseMimeType: "application/json",
@@ -403,6 +425,35 @@ exports.cleanupExpiredRooms = (0, scheduler_1.onSchedule)({ schedule: "0 15 * * 
     else {
         console.log("cleanupExpiredRooms: 삭제할 방 없음");
     }
+});
+// ──────────────────────────────────────────────────────────────
+// 모델 가용성 점검 (10일마다 KST 00:00 실행)
+// 각 폴백 체인에서 실제 응답하는 첫 번째 모델로 Firestore 갱신
+// ──────────────────────────────────────────────────────────────
+exports.checkModelAvailability = (0, scheduler_1.onSchedule)({ schedule: "0 15 1,11,21 * *", timeZone: "UTC", region: "asia-northeast3", secrets: [GEMINI_API_KEY] }, async () => {
+    const ai = new genai_1.GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
+    const configRef = db.collection("config").doc("models");
+    // 체인 순서대로 테스트 호출 → 성공한 첫 모델 반환
+    async function findWorkingModel(chain) {
+        for (const model of chain) {
+            try {
+                await ai.models.generateContent({ model, contents: "ping" });
+                console.log(`checkModelAvailability: ${model} 정상`);
+                return model;
+            }
+            catch (e) {
+                console.warn(`checkModelAvailability: ${model} 응답 없음 → 다음 모델 시도`, e);
+            }
+        }
+        // 체인 전체 실패 시 마지막 모델 유지 (에러 방지)
+        return chain[chain.length - 1];
+    }
+    const [flash, pro] = await Promise.all([
+        findWorkingModel(FLASH_CHAIN),
+        findWorkingModel(PRO_CHAIN),
+    ]);
+    await configRef.set({ flash, pro, checkedAt: Date.now() }, { merge: true });
+    console.log(`checkModelAvailability 완료: flash=${flash}, pro=${pro}`);
 });
 // ──────────────────────────────────────────────────────────────
 // R2 이미지 업로드용 Presigned URL 발급

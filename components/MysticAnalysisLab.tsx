@@ -109,7 +109,7 @@ const MysticAnalysisLab: React.FC<MysticAnalysisLabProps> = ({ lottoHistory, onB
   };
 
   return (
-    <div className="fixed inset-0 z-[5000] bg-[#020617] text-slate-200 overflow-hidden flex flex-col animate-in fade-in duration-700">
+    <div className="fixed inset-0 z-[5000] bg-[#020617] text-slate-200 flex flex-col animate-in fade-in duration-700">
       <header className="relative z-10 glass border-b border-white/5 px-8 py-6 flex justify-between items-center backdrop-blur-3xl shrink-0">
         <div className="flex items-center space-x-6">
           <button onClick={onBack} className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors">

@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>법률 자문 요청서 - 미스틱 로또</title>
+    <style>
+        body {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 40px;
+            background-color: #f9f9f9;
+        }
+        .document-wrapper {
+            background: #fff;
+            padding: 60px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            border-top: 10px solid #2c3e50;
+        }
+        h1 {
+            font-size: 28px;
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 40px;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 20px;
+        }
+        .meta-info {
+            text-align: right;
+            margin-bottom: 40px;
+            font-size: 0.95em;
+        }
+        h2 {
+            font-size: 20px;
+            color: #2c3e50;
+            border-left: 5px solid #2c3e50;
+            padding-left: 15px;
+            margin-top: 40px;
+            margin-bottom: 20px;
+            background-color: #f8f9fa;
+            padding-top: 10px;
+            padding-bottom: 10px;
+        }
+        h3 {
+            font-size: 17px;
+            color: #34495e;
+            margin-top: 25px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 25px;
+            table-layout: fixed;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px 15px;
+            text-align: left;
+            word-break: keep-all;
+            overflow-wrap: break-word;
+        }
+        th {
+            background-color: #f2f4f6;
+            color: #333;
+            font-weight: 600;
+            width: 30%;
+        }
+        .request-box {
+            background-color: #fff9f0;
+            border: 1px solid #ffebcc;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+        .request-box strong {
+            color: #d35400;
+            display: block;
+            margin-bottom: 10px;
+            font-size: 1.05em;
+        }
+        .highlight {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .footer {
+            margin-top: 60px;
+            text-align: center;
+            font-size: 0.9em;
+            color: #7f8c8d;
+            border-top: 1px solid #eee;
+            padding-top: 20px;
+        }
+        @media print {
+            body { background: #fff; margin: 0; padding: 0; }
+            .document-wrapper { box-shadow: none; padding: 20px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="document-wrapper">
+    <h1>법률 자문 요청서</h1>
+    
+    <div class="meta-info">
+        <strong>작성일:</strong> 2026년 2월 19일<br>
+        <strong>수신:</strong> 법무법인 담당 변호사 귀하<br>
+        <strong>발신:</strong> 미스틱 로또(Mystic Lotto) 개발팀
+    </div>
+
+    <h2>1. 서비스 개요</h2>
+    <p>본 앱은 사용자의 생년월일 및 사주 정보를 기반으로 로또 번호를 추천하는 <strong>디지털 콘텐츠 제공 서비스</strong>입니다. 실제 복권 구매 대행이나 금전 배팅 기능은 일절 포함하지 않으며, 모든 결과물은 통계 및 역학적 추론에 기반한 정보 서비스에 한정됩니다.</p>
+
+    <h2>2. 재화 구조 (이원 화폐 시스템)</h2>
+    <p>본 앱은 소비자 보호와 법적 안정성을 위해 예치금 성격의 재화와 활동성 재화를 이원화하여 운영합니다.</p>
+    
+    <h3>[재화 상세 비교]</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>구분</th>
+                <th>나디르 (Nadir)</th>
+                <th>루멘 (Lumen)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <th>법적 성격</th>
+                <td>현금 대응 유료 예치금</td>
+                <td>앱 내 활동 및 콘텐츠 이용권</td>
+            </tr>
+            <tr>
+                <th>취득 방법</th>
+                <td>인앱결제 (현금 충전)</td>
+                <td>나디르 전환, 출석 보상, 봉헌 등</td>
+            </tr>
+            <tr>
+                <th>환불 정책</th>
+                <td>미사용분 전액 환불 가능</td>
+                <td><span class="highlight">환불 불가</span> (구매 완료 간주)</td>
+            </tr>
+            <tr>
+                <th>환전성</th>
+                <td>현금 환급 가능</td>
+                <td><span class="highlight">현금/나디르 역전환 불가</span></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>3. 주요 시스템 및 서비스 내용</h2>
+    <ul>
+        <li><strong>봉헌 시스템:</strong> 루멘을 투입하여 확률에 따라 랜덤 배율의 루멘을 반환받는 시스템 (현금화 불가).</li>
+        <li><strong>로또 분석:</strong> 오늘의 운세(천명수), 통계 정밀 분석, 연간 사주 풀이 정보 제공.</li>
+        <li><strong>커뮤니티:</strong> 사용자 간 루멘 선물 및 대화방 개설 기능.</li>
+    </ul>
+
+    <h2>4. 법적 검토 요청 사항</h2>
+    
+    <div class="request-box">
+        <strong>검토 1. 재화 구조의 적법성</strong>
+        나디르(예치) → 루멘(소비)의 단방향 전환 구조가 전자상거래법 및 전자금융거래법상 적절하게 설계되었는지 검토 부탁드립니다.
+    </div>
+
+    <div class="request-box">
+        <strong>검토 2. 선불전자지급수단 등록 의무</strong>
+        나디르가 전자금융거래법상 등록 의무 대상인지, 발행 잔액 기준(30억) 등에 따른 면제 요건 충족 가능성을 검토 바랍니다.
+    </div>
+
+    <div class="request-box">
+        <strong>검토 3. 봉헌 시스템의 사행성 여부</strong>
+        환전이 불가능한 루멘을 사용한 확률형 결과 제공이 사행행위규제법 또는 게임법상 사행성 게임물에 해당할 리스크를 검토 바랍니다.
+    </div>
+
+    <div class="request-box">
+        <strong>검토 4. 정보 제공 서비스의 적법성</strong>
+        로또 번호 추천 정보 제공 행위가 복권 및 복권기금법 등 관련 법령에 저촉되는지 검토 바랍니다.
+    </div>
+
+    <div class="request-box">
+        <strong>검토 5. 카드사 차지백(Chargeback) 대응</strong>
+        전환 시 수령한 명확한 동의 기록이 카드사 결제 분쟁 시 법적으로 유효한 소명 자료가 될 수 있는지 검토 바랍니다.
+    </div>
+
+    <div class="request-box">
+        <strong>검토 6. 사용자 간 선물 기능</strong>
+        무상 선물 기능이 전자금융거래법상 '자금이체' 규제에 포함되는지 여부를 검토 바랍니다.
+    </div>
+
+    <h2>5. 핵심 운영 원칙</h2>
+    <ol>
+        <li>루멘에서 나디르 또는 현금으로의 역전환은 시스템상 원천 차단함.</li>
+        <li>나디르 → 루멘 전환 시 청약철회 제한에 대한 별도 동의 수령.</li>
+        <li>봉헌 시스템의 확률 및 로또 당첨 무보장 원칙을 상시 공시함.</li>
+    </ol>
+
+    <div class="footer">
+        본 문서는 법률 자문을 위해 작성된 시스템 설명서입니다.<br>
+        &copy; 2026 Mystic Lotto Development Team. All Rights Reserved.
+    </div>
+</div>
+
+</body>
+</html>

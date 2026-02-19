@@ -315,10 +315,17 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
   const isBoardView = view === 'board' || view === 'post-detail' || view === 'post-edit';
 
   return (
-    <div className="fixed inset-0 z-[5000] bg-[#020617] text-slate-200 overflow-hidden flex flex-col animate-dimension-shift">
+    <div className="fixed inset-0 z-[5000] bg-[#020617] text-slate-200 flex flex-col animate-dimension-shift">
       <header className="relative z-[100] glass border-b border-white/5 px-8 py-6 flex justify-between items-center backdrop-blur-3xl shrink-0 shadow-2xl">
         <div className="flex items-center space-x-6">
-          <button onClick={view === 'lounge' ? onBack : () => setView('lounge')} className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors">
+          <button
+            onClick={() => {
+              if (view === 'lounge') onBack();
+              else if (view === 'post-detail' || view === 'post-edit') setView('board');
+              else setView('lounge');
+            }}
+            className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors"
+          >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           </button>
           <div className="flex flex-col">
@@ -328,7 +335,15 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
             <div className="flex items-center space-x-3 mt-1.5">
                <button onClick={() => setView('lounge')} className={`text-[9px] font-black uppercase tracking-widest ${view === 'lounge' || view === 'chat' ? 'text-indigo-400' : 'text-slate-500'}`}>Lounge</button>
                <span className="text-slate-800 text-[8px]">/</span>
-               <button onClick={() => setView('board')} className={`text-[9px] font-black uppercase tracking-widest ${isBoardView ? 'text-emerald-400' : 'text-slate-500'}`}>천상의 회람판</button>
+               <button onClick={() => setView('board')} className={`text-[9px] font-black uppercase tracking-widest ${isBoardView ? 'text-emerald-400' : 'text-slate-500'}`}>회람판</button>
+               {(view === 'post-detail' || view === 'post-edit') && (
+                 <>
+                   <span className="text-slate-800 text-[8px]">/</span>
+                   <span className="text-[9px] font-black uppercase tracking-widest text-emerald-400">
+                     {view === 'post-edit' ? '편집' : '게시글'}
+                   </span>
+                 </>
+               )}
             </div>
           </div>
         </div>

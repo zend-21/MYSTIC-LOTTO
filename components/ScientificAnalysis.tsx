@@ -1008,18 +1008,130 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                 </div>
               )}
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {[
                   { label: "벤포드 적합도", val: `${result.metrics.benfordScore}점`, color: "text-amber-400" },
                   { label: "산술 복잡도", val: `AC ${result.metrics.acValue}`, color: "text-cyan-400" },
                   { label: "패턴 일치 확률", val: `${result.matchProbability.toFixed(1)}%`, color: "text-emerald-400" },
-                  { label: "역대 유사 순위", val: `${result.historicalRank}위`, color: "text-slate-400" }
+                  { label: "역대 유사 순위", val: `${result.historicalRank}위`, color: "text-slate-400" },
+                  {
+                    label: "정규분포 Z-Score",
+                    val: `${result.metrics.sumZScore > 0 ? '+' : ''}${result.metrics.sumZScore}σ`,
+                    color: Math.abs(result.metrics.sumZScore) <= 1 ? "text-indigo-400" : Math.abs(result.metrics.sumZScore) <= 2 ? "text-yellow-400" : "text-rose-400"
+                  },
+                  {
+                    label: "분포 균일도",
+                    val: `${result.metrics.chiSquaredScore}점`,
+                    color: result.metrics.chiSquaredScore >= 75 ? "text-emerald-400" : result.metrics.chiSquaredScore >= 50 ? "text-yellow-400" : "text-rose-400"
+                  },
                 ].map((stat, i) => (
                   <div key={i} className="glass p-7 rounded-[2rem] border border-white/5 space-y-2 shadow-xl">
                     <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{stat.label}</p>
                     <p className={`text-2xl font-black ${stat.color}`}>{stat.val}</p>
                   </div>
                 ))}
+              </div>
+
+              {/* Z-Score 시각 패널 */}
+              <div className="glass p-8 rounded-[2.5rem] border border-indigo-500/20 shadow-xl space-y-5">
+                <div className="flex items-center space-x-4 mb-2">
+                  <div className="w-10 h-10 bg-indigo-500/20 rounded-xl flex items-center justify-center text-indigo-400 font-black text-sm">σ</div>
+                  <div>
+                    <h3 className="text-xs font-black text-indigo-300 uppercase tracking-widest">Normal Distribution Z-Score</h3>
+                    <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">합계의 통계적 위치 — 평균 138, 표준편차 24</p>
+                  </div>
+                </div>
+                {/* 수직 눈금 바 */}
+                <div className="relative h-8 mx-4">
+                  <div className="absolute inset-0 rounded-full bg-gradient-to-r from-rose-900/60 via-indigo-900/40 via-emerald-900/40 via-indigo-900/40 to-rose-900/60"></div>
+                  <div className="absolute inset-0 flex items-center justify-between px-4 text-[8px] font-black text-slate-500 pointer-events-none">
+                    <span>-3σ</span><span>-2σ</span><span>-1σ</span><span>0</span><span>+1σ</span><span>+2σ</span><span>+3σ</span>
+                  </div>
+                  {/* 현재 Z-Score 위치 마커 */}
+                  <div
+                    className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-6 rounded-sm bg-indigo-400 shadow-[0_0_8px_rgba(99,102,241,0.8)]"
+                    style={{ left: `${Math.min(100, Math.max(0, ((result.metrics.sumZScore + 3) / 6) * 100))}%` }}
+                  ></div>
+                </div>
+                <div className="p-4 bg-slate-900/50 rounded-2xl border border-white/5 space-y-1">
+                  <p className="text-[11px] text-indigo-200 font-bold text-center">
+                    이 조합의 합계 <span className="text-white font-black">{result.metrics.sum}</span>은 통계 평균(138)에서{' '}
+                    <span className={`font-black ${Math.abs(result.metrics.sumZScore) <= 1 ? 'text-indigo-300' : Math.abs(result.metrics.sumZScore) <= 2 ? 'text-yellow-300' : 'text-rose-300'}`}>
+                      {result.metrics.sumZScore > 0 ? '+' : ''}{result.metrics.sumZScore}σ
+                    </span>{' '}위치입니다.
+                  </p>
+                  <p className="text-[10px] text-slate-400 text-center italic">
+                    {Math.abs(result.metrics.sumZScore) <= 1
+                      ? '★ 중심부 안정권 — 역대 당첨 합계의 약 68%가 이 구간에 분포합니다.'
+                      : Math.abs(result.metrics.sumZScore) <= 2
+                      ? '▲ 외곽 변동권 — 역대 당첨 합계의 약 27%가 이 구간에 분포합니다.'
+                      : '◆ 극단 희귀권 — 역대 당첨 합계의 약 5% 미만이 이 구간에 분포합니다.'}
+                  </p>
+                </div>
+              </div>
+
+              {/* 카이제곱 분포 균일도 패널 */}
+              <div className="glass p-8 rounded-[2.5rem] border border-emerald-500/20 shadow-xl space-y-5">
+                <div className="flex items-center space-x-4 mb-2">
+                  <div className="w-10 h-10 bg-emerald-500/20 rounded-xl flex items-center justify-center text-emerald-400 font-black text-sm">χ²</div>
+                  <div>
+                    <h3 className="text-xs font-black text-emerald-300 uppercase tracking-widest">Chi-Squared Zone Distribution</h3>
+                    <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">5개 구간 번호 분포 균일도 — 높을수록 고르게 퍼짐</p>
+                  </div>
+                </div>
+                {/* 구간별 실제 분포 바차트 */}
+                <div className="flex gap-2 items-end h-16">
+                  {(() => {
+                    const zones = [
+                      { label: '1-9', size: 9 },
+                      { label: '10-19', size: 10 },
+                      { label: '20-29', size: 10 },
+                      { label: '30-39', size: 10 },
+                      { label: '40-45', size: 6 },
+                    ];
+                    const counts = [0, 0, 0, 0, 0];
+                    result.numbers.forEach((n: number) => {
+                      if (n <= 9) counts[0]++;
+                      else if (n <= 19) counts[1]++;
+                      else if (n <= 29) counts[2]++;
+                      else if (n <= 39) counts[3]++;
+                      else counts[4]++;
+                    });
+                    return zones.map((z, i) => {
+                      const expected = (6 * z.size / 45);
+                      const barH = Math.min(100, counts[i] * 25); // 최대 3개 이상이면 꽉참
+                      const isOver = counts[i] > expected + 0.5;
+                      const isUnder = counts[i] < expected - 0.5;
+                      return (
+                        <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                          <span className={`text-[9px] font-black ${isOver ? 'text-emerald-400' : isUnder ? 'text-slate-600' : 'text-slate-400'}`}>{counts[i]}</span>
+                          <div className="w-full rounded-t-lg relative" style={{ height: '48px', background: 'rgba(255,255,255,0.04)' }}>
+                            <div
+                              className={`absolute bottom-0 w-full rounded-t-lg transition-all ${isOver ? 'bg-emerald-500/60' : isUnder ? 'bg-slate-700/60' : 'bg-emerald-700/40'}`}
+                              style={{ height: `${barH}%` }}
+                            ></div>
+                            {/* 기대빈도 점선 */}
+                            <div className="absolute w-full border-t border-dashed border-cyan-500/40" style={{ bottom: `${Math.min(100, expected * 25)}%` }}></div>
+                          </div>
+                          <span className="text-[8px] text-slate-600 font-bold">{z.label}</span>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+                <div className="flex items-center gap-4 text-[8px] text-slate-500 font-bold px-1">
+                  <span className="flex items-center gap-1.5"><span className="w-3 border-t border-dashed border-cyan-500/60 inline-block"></span>기대빈도</span>
+                  <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded bg-emerald-500/60 inline-block"></span>실제 분포</span>
+                </div>
+                <div className="p-4 bg-slate-900/50 rounded-2xl border border-white/5">
+                  <p className="text-[10px] text-slate-400 leading-relaxed text-center italic">
+                    {result.metrics.chiSquaredScore >= 75
+                      ? `균일도 ${result.metrics.chiSquaredScore}점 — 번호가 5개 구간에 고르게 분산된 이상적인 조합입니다.`
+                      : result.metrics.chiSquaredScore >= 50
+                      ? `균일도 ${result.metrics.chiSquaredScore}점 — 일부 구간에 편중이 있으나 허용 범위 내입니다.`
+                      : `균일도 ${result.metrics.chiSquaredScore}점 — 특정 구간에 집중된 성향의 조합입니다.`}
+                  </p>
+                </div>
               </div>
 
               <div className="glass p-10 rounded-[4rem] border border-cyan-500/20 shadow-2xl space-y-6">

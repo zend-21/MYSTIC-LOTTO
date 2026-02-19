@@ -32,6 +32,37 @@ const calculateBenfordMetrics = (numbers: number[], historicalDist: number[]) =>
   };
 };
 
+// 정규분포 Z-Score: 로또 6/45 이론 합계 평균=138, 표준편차≈24
+const calculateZScore = (sum: number): number => {
+  return Number(((sum - 138) / 24).toFixed(2));
+};
+
+// 카이제곱 적합도: 5개 구간 균일도 → 구간 크기 비례 기대빈도 사용
+const calculateChiSquared = (numbers: number[]): number => {
+  const zones = [0, 0, 0, 0, 0]; // 1-9, 10-19, 20-29, 30-39, 40-45
+  numbers.forEach(n => {
+    if (n <= 9) zones[0]++;
+    else if (n <= 19) zones[1]++;
+    else if (n <= 29) zones[2]++;
+    else if (n <= 39) zones[3]++;
+    else zones[4]++;
+  });
+  // 구간 크기 비례 기대빈도: 총 45개 번호 중 6개 추출 기준
+  const expected = [
+    6 * (9 / 45),   // 1-9  (9개) → 1.200
+    6 * (10 / 45),  // 10-19 (10개) → 1.333
+    6 * (10 / 45),  // 20-29 (10개) → 1.333
+    6 * (10 / 45),  // 30-39 (10개) → 1.333
+    6 * (6 / 45),   // 40-45 (6개)  → 0.800
+  ];
+  let chiSum = 0;
+  zones.forEach((obs, i) => {
+    chiSum += Math.pow(obs - expected[i], 2) / expected[i];
+  });
+  // chiSum=0(완벽 균일)→100점, chiSum≥20(극단적 쏠림)→0점
+  return Math.max(0, Math.round(100 - chiSum * 5));
+};
+
 const calculateFullMetrics = (numbers: number[], lastRound: number[], historicalDist: number[]) => {
   const sorted = [...numbers].sort((a, b) => a - b);
   const sum = sorted.reduce((a, b) => a + b, 0);
@@ -42,6 +73,8 @@ const calculateFullMetrics = (numbers: number[], lastRound: number[], historical
   const acValue = calculateAC(sorted);
   const primeCount = sorted.filter(n => PRIMES.includes(n)).length;
   const { score: benfordScore, distribution: leadDigitsDistribution } = calculateBenfordMetrics(sorted, historicalDist);
+  const sumZScore = calculateZScore(sum);
+  const chiSquaredScore = calculateChiSquared(sorted);
 
   let consecutiveCount = 0;
   let minGap = 45;
@@ -65,7 +98,8 @@ const calculateFullMetrics = (numbers: number[], lastRound: number[], historical
     highLow: `${highs}:${6 - highs}`,
     consecutiveCount, sameEndingCount, primeCount, carryOverCount, neighborCount,
     averageGap: Number((totalGap / 5).toFixed(1)),
-    minGap, benfordScore, leadDigitsDistribution
+    minGap, benfordScore, leadDigitsDistribution,
+    sumZScore, chiSquaredScore
   };
 };
 

@@ -42,7 +42,7 @@ export default {
         },
         'dimension-shift': {
           '0%':   { transform: 'scale(0.9)', filter: 'blur(20px) brightness(0)', opacity: '0' },
-          '100%': { transform: 'scale(1)',   filter: 'blur(0) brightness(1)',     opacity: '1' },
+          '100%': { transform: 'scale(1)',   filter: 'none',                      opacity: '1' },
         },
         'hologram': {
           '0%, 100%': { backgroundPosition: '0% 50%' },

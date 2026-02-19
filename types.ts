@@ -80,8 +80,10 @@ export interface ScientificAnalysisResult {
     carryOverCount: number;
     neighborCount: number;
     averageGap: number;
-    benfordScore: number; 
-    leadDigitsDistribution: number[]; 
+    benfordScore: number;
+    leadDigitsDistribution: number[];
+    sumZScore: number;       // 정규분포 Z-Score: 합계가 이론 평균(138)에서 몇 σ 떨어져 있는지
+    chiSquaredScore: number; // 카이제곱 분포 균일도 점수 (0~100, 높을수록 균일)
   };
   scientificReport: string;
   matchProbability: number;
@@ -243,6 +245,7 @@ export interface BoardPost {
   views: number;
   likes: number;
   likedBy?: string[];
+  viewedBy?: string[]; // 조회한 유저 UID 목록 (중복 카운트 방지)
   createdAt: number;
   isNotice: boolean;
   mediaUrl?: string;

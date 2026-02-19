@@ -104,11 +104,22 @@ const BoardPanel: React.FC<BoardPanelProps> = ({ profile, orb, currentView, onSe
   };
 
   const handlePostClick = async (post: BoardPost) => {
-    setActivePost({ ...post, views: post.views + 1 });
+    const uid = auth.currentUser?.uid;
+    const isAuthor = uid && post.authorId === uid;
+    const alreadyViewed = uid && (post.viewedBy || []).includes(uid);
+    const shouldCount = uid && !isAuthor && !alreadyViewed;
+
+    setActivePost({ ...post, views: shouldCount ? post.views + 1 : post.views });
     setDeleteConfirm(false);
     setCommentInput('');
     onSetView('post-detail');
-    updateDoc(doc(db, "square", "board", "posts", post.id), { views: increment(1) }).catch(() => {});
+
+    if (shouldCount) {
+      updateDoc(doc(db, "square", "board", "posts", post.id), {
+        views: increment(1),
+        viewedBy: arrayUnion(uid),
+      }).catch(() => {});
+    }
   };
 
   // ── 블록 관리 ──────────────────────────────────────
