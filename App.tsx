@@ -8,12 +8,10 @@ const ADMIN_INFINITE_POINTS = 999999999; // ∞ 표시 기준값
 // 포인트 표시 헬퍼
 const displayPoints = (pts: number) => pts >= ADMIN_INFINITE_POINTS ? '∞' : pts.toLocaleString();
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import KoreanLunarCalendar from 'korean-lunar-calendar';
-import { UserProfile, FortuneResult, SavedFortune, OrbState, CalendarType, ORB_DECORATIONS, GOLDEN_CARD_PRICE, OFFERING_CONVERSION_RATE, AnnualDestiny, ScientificAnalysisResult, ScientificFilterConfig, DAILY_LIMIT, COST_ANNUAL, INITIAL_POINTS } from './types';
+import React, { useState, useEffect, useRef } from 'react';
+import { UserProfile, FortuneResult, SavedFortune, OrbState, LottoRound, ORB_DECORATIONS, GOLDEN_CARD_PRICE, OFFERING_CONVERSION_RATE, AnnualDestiny, ScientificAnalysisResult, ScientificFilterConfig, DAILY_LIMIT, COST_ANNUAL, INITIAL_POINTS } from './types';
 import { getFortuneAndNumbers, getFixedDestinyNumbers, spendPoints } from './services/geminiService';
 import { getScientificRecommendation } from './services/scientificService';
-import { LottoRound } from './types';
 import FortuneOrb, { OrbVisual } from './components/FortuneOrb';
 import LottoGenerator from './components/LottoGenerator';
 import GoldenCard from './components/GoldenCard';
@@ -25,17 +23,14 @@ import ScientificAnalysis from './components/ScientificAnalysis';
 import CelestialSquare from './components/CelestialSquare';
 import UserProfilePage from './components/UserProfilePage';
 import MysticAnalysisLab from './components/MysticAnalysisLab';
+import ProfileSetupForm from './components/ProfileSetupForm';
+import AdminModal from './components/AdminModal';
+import AnnualReportModal from './components/AnnualReportModal';
 
 // Firebase imports
 import { auth, db, loginWithGoogle, logout } from './services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, deleteDoc, limit as fsLimit, runTransaction, updateDoc, deleteField, where, getDocs, writeBatch, increment } from "firebase/firestore";
-
-interface CitySuggestion {
-  display: string;
-  lat: number;
-  lon: number;
-}
+import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, deleteDoc, limit as fsLimit, runTransaction, updateDoc, where, getDocs, writeBatch, increment } from "firebase/firestore";
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -71,64 +66,6 @@ const App: React.FC = () => {
   const [lottoHistory, setLottoHistory] = useState<LottoRound[]>([]);
 
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
-  const [isEditingExisting, setIsEditingExisting] = useState(false); 
-  const [adminRound, setAdminRound] = useState('');
-  const [adminNumbers, setAdminNumbers] = useState(['', '', '', '', '', '']);
-  const [adminBonus, setAdminBonus] = useState('');
-  const [singleInputStr, setSingleInputStr] = useState(''); 
-  const [deleteConfirmRound, setDeleteConfirmRound] = useState<number | null>(null);
-  const [newSubAdminUid, setNewSubAdminUid] = useState('');
-  const [newSubAdminPoints, setNewSubAdminPoints] = useState('');
-  const [subAdminActionLoading, setSubAdminActionLoading] = useState(false);
-
-  const [inputName, setInputName] = useState('');
-  const [birthYear, setBirthYear] = useState('');
-  const [birthMonth, setBirthMonth] = useState('');
-  const [birthDay, setBirthDay] = useState('');
-  
-  const [inputCity, setInputCity] = useState(''); 
-  const [selectedCoords, setSelectedCoords] = useState<{lat: number, lon: number} | null>(null);
-  const [citySuggestions, setCitySuggestions] = useState<CitySuggestion[]>([]); 
-  const [showCityList, setShowCityList] = useState(false);
-  const [isSearchingCity, setIsSearchingCity] = useState(false);
-  const debounceRef = useRef<any>(null);
-  
-  const [selectedHour, setSelectedHour] = useState('09');
-  const [selectedMinute, setSelectedMinute] = useState('00');
-  const [selectedAmPm, setSelectedAmPm] = useState<'오전' | '오후'>('오전');
-  const [showTimePicker, setShowTimePicker] = useState(false);
-  const [timePickerStep, setTimePickerStep] = useState<'ampm' | 'hour' | 'minute'>('ampm');
-
-  const [inputGender, setInputGender] = useState<'M' | 'F'>('M');
-  const [calendarType, setCalendarType] = useState<CalendarType>('solar');
-  const [isIntercalary, setIsIntercalary] = useState(false);
-
-  const yearRef = useRef<HTMLInputElement>(null);
-  const monthRef = useRef<HTMLInputElement>(null);
-  const dayRef = useRef<HTMLInputElement>(null);
-  const submitRef = useRef<HTMLButtonElement>(null);
-
-  // 설정 폼용 음력 날짜 텍스트
-  const setupLunarText = useMemo(() => {
-    const y = parseInt(birthYear);
-    const m = parseInt(birthMonth);
-    const d = parseInt(birthDay);
-    if (!y || !m || !d || birthYear.length < 4) return null;
-    try {
-      const cal = new KoreanLunarCalendar();
-      if (calendarType === 'solar') {
-        if (!cal.setSolarDate(y, m, d)) return null;
-        const lunar = cal.getLunarCalendar();
-        const inter = lunar.intercalation ? ' (윤달)' : '';
-        return `음력 ${lunar.year}.${String(lunar.month).padStart(2, '0')}.${String(lunar.day).padStart(2, '0')}${inter}`;
-      } else {
-        // 음력 입력 → 대응하는 양력 표시
-        if (!cal.setLunarDate(y, m, d, isIntercalary)) return null;
-        const solar = cal.getSolarCalendar();
-        return `≈ 양력 ${solar.year}.${String(solar.month).padStart(2, '0')}.${String(solar.day).padStart(2, '0')}`;
-      }
-    } catch { return null; }
-  }, [birthYear, birthMonth, birthDay, calendarType, isIntercalary]);
 
   const [archives, setArchives] = useState<SavedFortune[]>([]);
   const [offeringData, setOfferingData] = useState<{amount: number, multiplier: number} | null>(null);
@@ -148,7 +85,10 @@ const App: React.FC = () => {
     annualDestinies: {},
     dailyExtractCount: 0,
     lastExtractDate: new Date().toISOString().split('T')[0],
-    favoriteRoomIds: []
+    favoriteRoomIds: [],
+    lastVisitDate: '',
+    dailyOrbTapExp: 0,
+    dailyPostCount: 0,
   });
 
   // --- Firebase Sync Logic ---
@@ -214,6 +154,18 @@ const App: React.FC = () => {
                 }
               }
               setOrb(orbData);
+
+              // 매일 첫 방문 보너스 (100 루멘) — 세션당 1회만 처리
+              if (!hasGrantedVisitBonusRef.current) {
+                hasGrantedVisitBonusRef.current = true;
+                const today = new Date().toISOString().split('T')[0];
+                if ((orbData.lastVisitDate || '') !== today) {
+                  updateDoc(userDocRef, {
+                    'orb.points': increment(100),
+                    'orb.lastVisitDate': today,
+                  }).then(() => setToast("매일 첫 방문 보너스: +100 루멘! 🌟")).catch(() => {});
+                }
+              }
             }
           } else {
             // New user initialization
@@ -225,23 +177,88 @@ const App: React.FC = () => {
           setArchives(snapshot.docs.map(d => d.data() as SavedFortune));
         });
 
-        // 선물 inbox 리스너 — 누군가 루멘을 선물하면 자동으로 포인트 반영
+        // 선물 inbox 리스너 — 루멘 선물 및 공명 경험치 자동 반영
         const inboxRef = collection(db, "users", user.uid, "inbox");
         const unsubscribeInbox = onSnapshot(inboxRef, async (snap) => {
           if (snap.empty) return;
           let totalGift = 0;
+          let totalExp = 0;
           const batch = writeBatch(db);
           snap.docs.forEach(d => {
-            totalGift += (d.data().amount || 0);
+            const data = d.data();
+            if (data.type === 'exp') {
+              totalExp += (data.amount || 0);
+            } else {
+              totalGift += (data.amount || 0);
+            }
             batch.delete(d.ref);
           });
           if (totalGift > 0) {
-            // increment로 Firestore 포인트 원자적 증가 → onSnapshot이 최신값 반영
             batch.update(userDocRef, { 'orb.points': increment(totalGift) });
-            await batch.commit().catch(() => {});
-            setToast(`${totalGift.toLocaleString()} 루멘을 선물받았습니다! ✨`);
+          }
+          await batch.commit().catch(() => {});
+          if (totalGift > 0) setToast(`${totalGift.toLocaleString()} 루멘을 선물받았습니다! ✨`);
+          if (totalExp > 0) {
+            // exp는 클라이언트 growOrb로 처리 (레벨 계산 포함)
+            setOrb((prev: OrbState) => {
+              const newExp = prev.exp + totalExp;
+              let newLevel = Math.floor(newExp / 100) + 1;
+              if (ADMIN_UIDS.includes(user.uid)) newLevel = ADMIN_LEVEL;
+              else if (user.uid in subAdminData) newLevel = Math.max(newLevel, SUB_ADMIN_LEVEL);
+              const colors = ['#6366f1', '#8b5cf6', '#d946ef', '#f43f5e', '#f59e0b', '#10b981', '#3b82f6'];
+              const color = colors[newLevel % colors.length];
+              return { ...prev, level: newLevel, exp: newExp, color, aura: color + '80' };
+            });
+            setToast(`게시글 공명 10회 달성! +${(totalExp / 10 * 0.1).toFixed(1)}레벨 🌟`);
           }
         });
+
+        // 세션 복구 체크 — 결과 수신 전 앱이 종료된 경우 복구
+        getDoc(doc(db, "users", user.uid, "session", "data")).then(snap => {
+          if (!snap.exists()) return;
+          const session = snap.data();
+          const RECOVERY_WINDOW = 24 * 60 * 60 * 1000;
+          const now = Date.now();
+          const updates: Record<string, boolean> = {};
+
+          if (session.divine && !session.divine.viewed && (now - session.divine.savedAt) < RECOVERY_WINDOW) {
+            setResult(session.divine.data as FortuneResult);
+            setToast("이전에 발행된 천기를 복구했습니다. ✨");
+            updates['divine.viewed'] = true;
+          }
+
+          if (session.annual && !session.annual.viewed && (now - session.annual.savedAt) < RECOVERY_WINDOW) {
+            const res = session.annual.data;
+            const recoveredYear = new Date(session.annual.savedAt).getFullYear();
+            const annual: AnnualDestiny = {
+              year: recoveredYear,
+              numbers: res.luckyNumbers,
+              luckyColor: res.luckyColor,
+              reason: res.destinyDescription,
+              planningStrategy: res.planningStrategy,
+              bestMonths: res.bestMonths,
+              worstMonths: res.worstMonths,
+              wealthDetailed: res.wealthDetailed,
+              loveDetailed: res.loveDetailed,
+              healthDetailed: res.healthDetailed,
+              tarotDetailed: res.tarotDetailed,
+              tarotCardName: res.tarotCardName,
+              astrologyDetailed: res.astrologyDetailed,
+              sajuDeepDive: res.sajuDeepDive,
+              numberExplanations: res.numberExplanations,
+              timestamp: session.annual.savedAt,
+            };
+            updateDoc(doc(db, "users", user.uid), {
+              [`orb.annualDestinies.${recoveredYear}`]: annual
+            }).catch(() => {});
+            setToast("이전에 생성된 연간 대운 리포트를 복구했습니다. ✨");
+            updates['annual.viewed'] = true;
+          }
+
+          if (Object.keys(updates).length > 0) {
+            updateDoc(doc(db, "users", user.uid, "session", "data"), updates).catch(() => {});
+          }
+        }).catch(() => {});
 
         return () => { unsubscribeUser(); unsubscribeArchives(); unsubscribeInbox(); };
       } else {
@@ -264,6 +281,7 @@ const App: React.FC = () => {
   // 2. Automatic Cloud Sync for Profile and Orb
   // Replaces the need to call syncProfileAndOrb manually in every function
   const isInitialMount = useRef(true);
+  const hasGrantedVisitBonusRef = useRef(false);
   useEffect(() => {
     if (isInitialMount.current) {
       isInitialMount.current = false;
@@ -324,42 +342,6 @@ const App: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [toast]);
-
-  const handleCityInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setInputCity(val);
-    setSelectedCoords(null); 
-
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-
-    const searchVal = val.trim();
-    if (searchVal.length >= 2) {
-      debounceRef.current = setTimeout(async () => {
-        setIsSearchingCity(true);
-        try {
-          const response = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchVal)}&format=json&addressdetails=1&limit=6&accept-language=ko`, {
-            headers: { 'User-Agent': 'MysticLottoApp/1.0' }
-          });
-          if (!response.ok) throw new Error("API Limit");
-          const data = await response.json();
-          const suggestions: CitySuggestion[] = data.map((item: any) => ({
-            display: item.display_name,
-            lat: parseFloat(item.lat),
-            lon: parseFloat(item.lon)
-          }));
-          setCitySuggestions(suggestions);
-          setShowCityList(suggestions.length > 0);
-        } catch (err) {
-          console.error("City search failed", err);
-        } finally {
-          setIsSearchingCity(false);
-        }
-      }, 600);
-    } else {
-      setCitySuggestions([]);
-      setShowCityList(false);
-    }
-  };
 
   const hasExtractedDivineToday = archives.some(item => 
     item.type === 'divine' && 
@@ -456,6 +438,10 @@ const App: React.FC = () => {
       // 포인트 차감은 Cloud Function 내부에서 서버사이드 처리
       const res = await getFortuneAndNumbers(profile);
       setResult(res);
+      // 결과 수신 성공 → 세션 viewed 처리 (복구 방지)
+      if (currentUser) {
+        updateDoc(doc(db, "users", currentUser.uid, "session", "data"), { "divine.viewed": true }).catch(() => {});
+      }
       await saveToArchive('divine', res);
       // dailyExtractCount만 클라이언트 상태로 갱신 (UX 목적)
       setOrb(prev => ({ ...prev, dailyExtractCount: prev.dailyExtractCount + 1 }));
@@ -545,6 +531,10 @@ const App: React.FC = () => {
       await saveToArchive('annual', annual);
       setIsRitualUnlocked(false);
       onToast(`${currentYear}년 대운 분석이 완료되어 서고에 영구 보존되었습니다.`);
+      // 결과 수신 성공 → 세션 viewed 처리 (복구 방지)
+      if (currentUser) {
+        updateDoc(doc(db, "users", currentUser.uid, "session", "data"), { "annual.viewed": true }).catch(() => {});
+      }
       setShowFullAnnualReport(true);
     } catch (err) {
       onToast("의식 진행 중 기운이 소멸되었습니다.");
@@ -553,150 +543,50 @@ const App: React.FC = () => {
     }
   };
 
-  const handleStart = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputName || !birthYear || !birthMonth || !birthDay || !inputCity) return;
-    const formattedBirth = `${birthYear}-${birthMonth.padStart(2, '0')}-${birthDay.padStart(2, '0')}`;
-    let h = parseInt(selectedHour);
-    if (selectedAmPm === '오후' && h < 12) h += 12;
-    if (selectedAmPm === '오전' && h === 12) h = 0;
-    const formattedTime = `${h.toString().padStart(2, '0')}:${selectedMinute}`;
-    setProfile({ 
-      name: inputName, 
-      birthDate: formattedBirth, 
-      birthTime: formattedTime, 
-      birthCity: inputCity, 
-      lat: selectedCoords?.lat,
-      lon: selectedCoords?.lon,
-      gender: inputGender, 
-      calendarType, 
-      isIntercalary 
-    });
-  };
-
-  const handleYearChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 4);
-    setBirthYear(val);
-    if (val.length === 4) monthRef.current?.focus();
-  };
-
-  const handleMonthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
-    setBirthMonth(val);
-    if (val.length === 2) dayRef.current?.focus();
-  };
-
-  const handleDayChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
-    setBirthDay(val);
-    if (val.length === 2) { setShowTimePicker(true); setTimePickerStep('ampm'); }
-  };
-
-  const handleSelectAmPm = (ampm: '오전' | '오후') => { setSelectedAmPm(ampm); setTimePickerStep('hour'); };
-  const handleSelectHour = (h: string) => { setSelectedHour(h); setTimePickerStep('minute'); };
-  const handleSelectMinute = (m: string) => { setSelectedMinute(m); setShowTimePicker(false); setTimePickerStep('ampm'); };
-
-  const resetAdminForm = () => {
-    const next = lottoHistory.length > 0 ? lottoHistory[0].round + 1 : 1;
-    setAdminRound(next.toString());
-    setAdminNumbers(['', '', '', '', '', '']);
-    setAdminBonus('');
-    setSingleInputStr('');
-    setIsEditingExisting(false);
-  };
-
-  const handleAppointSubAdmin = async () => {
-    const uid = newSubAdminUid.trim();
-    const pts = parseInt(newSubAdminPoints);
-    if (!uid || isNaN(pts) || pts < 0) { onToast("UID와 루멘 수치를 올바르게 입력해주세요."); return; }
-    if (ADMIN_UIDS.includes(uid)) { onToast("최고관리자는 부관리자로 임명할 수 없습니다."); return; }
-    setSubAdminActionLoading(true);
-    try {
-      const configRef = doc(db, "config", "subAdmins");
-      await setDoc(configRef, { [uid]: pts }, { merge: true });
-      setSubAdminConfig((prev: { [uid: string]: number }) => ({ ...prev, [uid]: pts }));
-      setNewSubAdminUid('');
-      setNewSubAdminPoints('');
-      onToast(`부관리자 임명 완료: ${uid}`);
-    } catch (e) {
-      onToast("임명 실패: 권한을 확인해주세요.");
-    } finally {
-      setSubAdminActionLoading(false);
-    }
-  };
-
-  const handleDismissSubAdmin = async (uid: string) => {
-    setSubAdminActionLoading(true);
-    try {
-      const configRef = doc(db, "config", "subAdmins");
-      await updateDoc(configRef, { [uid]: deleteField() });
-      setSubAdminConfig((prev: { [uid: string]: number }) => {
-        const next = { ...prev };
-        delete next[uid];
-        return next;
-      });
-      onToast(`부관리자 해임 완료: ${uid}`);
-    } catch (e) {
-      onToast("해임 실패: 권한을 확인해주세요.");
-    } finally {
-      setSubAdminActionLoading(false);
-    }
-  };
-
-  const handleRegisterLotto = async () => {
-    const roundNum = parseInt(adminRound);
-    const nums = adminNumbers.map(n => parseInt(n)).filter(n => !isNaN(n));
-    const bonusNum = parseInt(adminBonus);
-    if (isNaN(roundNum) || nums.length < 6 || isNaN(bonusNum)) { onToast("모든 번호를 올바르게 입력해주세요."); return; }
-    const newRound: LottoRound = { round: roundNum, numbers: nums, bonus: bonusNum };
-    const updatedHistory = [newRound, ...lottoHistory.filter(r => r.round !== roundNum)].sort((a, b) => b.round - a.round);
-    await setDoc(doc(db, "global", "lotto_history"), { history: updatedHistory });
-    onToast(`${roundNum}회차 정보가 기록되었습니다.`);
-    setIsEditingExisting(false); setSingleInputStr(''); setAdminNumbers(['', '', '', '', '', '']); setAdminBonus('');
-  };
-
-  const handleEditRound = (round: LottoRound) => {
-    setIsEditingExisting(true);
-    setAdminRound(round.round.toString());
-    setAdminNumbers(round.numbers.map(n => n.toString()));
-    setAdminBonus(round.bonus.toString());
-  };
-
-  const handleDeleteRoundAction = async (roundNum: number) => {
-    const updatedHistory = lottoHistory.filter(r => r.round !== roundNum);
-    await setDoc(doc(db, "global", "lotto_history"), { history: updatedHistory });
-    setDeleteConfirmRound(null);
-    onToast(`${roundNum}회차 정보가 소멸되었습니다.`);
-  };
-
-  const handleSingleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let val = e.target.value;
-    setSingleInputStr(val);
-    if (val.endsWith('.')) {
-      const num = parseInt(val.slice(0, -1).trim());
-      if (!isNaN(num) && num >= 1 && num <= 45) {
-        const currentEmptyIdx = adminNumbers.findIndex(n => n === '');
-        if (currentEmptyIdx !== -1) {
-          const next = [...adminNumbers]; next[currentEmptyIdx] = num.toString(); setAdminNumbers(next);
-        } else if (adminBonus === '') { setAdminBonus(num.toString()); }
-        setSingleInputStr('');
-      }
-    }
-  };
-
-  const removeNumber = (idx: number, type: 'main' | 'bonus') => {
-    if (type === 'main') { const next = [...adminNumbers]; next[idx] = ''; setAdminNumbers(next); }
-    else setAdminBonus('');
-  };
-
   const growOrb = (amount: number) => {
     setOrb(prev => {
       const newExp = prev.exp + amount;
-      const newLevel = Math.floor(newExp / 100) + 1;
+      let newLevel = Math.floor(newExp / 100) + 1;
+      // 관리자 레벨은 growOrb로 변경하지 않음 (Flash 방지)
+      if (isAdmin) newLevel = ADMIN_LEVEL;
+      else if (isSubAdmin) newLevel = Math.max(newLevel, SUB_ADMIN_LEVEL);
       const colors = ['#6366f1', '#8b5cf6', '#d946ef', '#f43f5e', '#f59e0b', '#10b981', '#3b82f6'];
       const color = colors[newLevel % colors.length];
       return { ...prev, level: newLevel, exp: newExp, color, aura: color + '80' };
     });
+  };
+
+  // 구슬 탭: 하루 최대 0.5레벨(50 exp) 한도
+  const handleOrbTap = () => {
+    const today = new Date().toISOString().split('T')[0];
+    const isNewDay = orb.lastExtractDate !== today;
+    const tapExp = isNewDay ? 0 : (orb.dailyOrbTapExp ?? 0);
+    if (tapExp >= 50) {
+      onToast("오늘의 구슬 수련 한도에 도달했습니다. (0.5레벨/일)");
+      return;
+    }
+    const gained = Math.min(5, 50 - tapExp);
+    growOrb(gained);
+    addPoints(50);
+    setOrb(prev => ({
+      ...prev,
+      dailyOrbTapExp: tapExp + gained,
+      ...(isNewDay ? { lastExtractDate: today, dailyExtractCount: 0, dailyPostCount: 0 } : {}),
+    }));
+  };
+
+  // 회람판 글 작성 경험치: 하루 최대 5회(0.5레벨) 한도
+  const handlePostCreated = () => {
+    const today = new Date().toISOString().split('T')[0];
+    const isNewDay = orb.lastExtractDate !== today;
+    const postCount = isNewDay ? 0 : (orb.dailyPostCount ?? 0);
+    if (postCount >= 5) return;
+    growOrb(10); // 0.1레벨 = 10 exp
+    setOrb((prev: OrbState) => ({
+      ...prev,
+      dailyPostCount: postCount + 1,
+      ...(isNewDay ? { lastExtractDate: today, dailyExtractCount: 0, dailyOrbTapExp: 0 } : {}),
+    }));
   };
 
   if (!currentUser) {
@@ -723,291 +613,31 @@ const App: React.FC = () => {
   }
 
   if (!profile) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-[#020617]">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_rgba(30,58,138,0.2),_transparent)] pointer-events-none"></div>
-        <div className="relative z-10 glass p-10 rounded-[3rem] w-full max-w-lg space-y-10 animate-in fade-in zoom-in duration-700 shadow-2xl border-white/5 text-center">
-          <div className="space-y-3 flex flex-col items-center">
-            <img src="/s_mlotto_logo.png" alt="Mystic" className="w-24 h-24 object-contain drop-shadow-[0_0_24px_rgba(99,102,241,0.5)]" />
-            <h1 className="text-5xl font-mystic font-bold text-transparent bg-clip-text bg-gradient-to-b from-indigo-200 via-indigo-400 to-indigo-600 tracking-tighter uppercase">Mystic Lotto</h1>
-            <p className="text-slate-500 text-[10px] font-black tracking-[0.6em] uppercase">Fate & Resonance</p>
-          </div>
-          <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl">
-             <p className="text-xs text-indigo-300 font-bold">환영합니다, {currentUser.displayName || '운명 개척자'}님!<br/>정확한 운명 분석을 위해 생년월일시 정보를 입력하십시오.</p>
-          </div>
-          <form onSubmit={handleStart} className="space-y-6 text-left">
-            <div className="space-y-5">
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest px-1">Fortune Seeker (성함)</label>
-                <input type="text" required value={inputName} onChange={e => setInputName(e.target.value)} className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-white focus:outline-none focus:border-indigo-500 font-bold" placeholder="성함을 입력하세요" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest px-1">Divine Energy (성별)</label>
-                <div className="flex gap-4">
-                  <button type="button" onClick={() => setInputGender('M')} className={`flex-1 py-4 rounded-2xl border-2 transition-all font-black text-sm ${inputGender === 'M' ? 'border-indigo-500 bg-indigo-500/10 text-white shadow-[0_0_20px_rgba(79,70,229,0.3)]' : 'border-slate-800 text-slate-500'}`}>남성 (陽)</button>
-                  <button type="button" onClick={() => setInputGender('F')} className={`flex-1 py-4 rounded-2xl border-2 transition-all font-black text-sm ${inputGender === 'F' ? 'border-indigo-500 bg-indigo-500/10 text-white shadow-[0_0_20px_rgba(79,70,229,0.3)]' : 'border-slate-800 text-slate-500'}`}>여성 (음)</button>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest px-1">Calendar System (력법)</label>
-                <div className="p-1.5 bg-slate-950/50 rounded-2xl border border-slate-800 flex">
-                  <button type="button" onClick={() => setCalendarType('solar')} className={`flex-1 py-3 text-xs font-black rounded-xl transition-all ${calendarType === 'solar' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}>양력</button>
-                  <button type="button" onClick={() => setCalendarType('lunar')} className={`flex-1 py-3 text-xs font-black rounded-xl transition-all ${calendarType === 'lunar' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}>음력</button>
-                </div>
-              </div>
-              
-              <div className="space-y-2 relative">
-                <div className="flex items-center justify-between px-1">
-                  <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Birth City (출생 도시)</label>
-                  <span className="text-[9px] font-bold text-sky-400">출생 도시를 모를 경우, 국가명을 입력하세요</span>
-                </div>
-                <div className="relative">
-                  <input type="text" required value={inputCity} onChange={handleCityInputChange} className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-white focus:outline-none focus:border-indigo-500 font-bold pr-12" placeholder="도시 또는 국가명 입력" />
-                  {isSearchingCity && <div className="absolute right-4 top-1/2 -translate-y-1/2"><div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div></div>}
-                </div>
-                {showCityList && (
-                  <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900 border border-indigo-500/30 rounded-2xl shadow-2xl z-[100] max-h-56 overflow-y-auto custom-scroll">
-                    {citySuggestions.map((city, idx) => (
-                      <button key={idx} type="button" onClick={() => { setInputCity(city.display); setSelectedCoords({lat: city.lat, lon: city.lon}); setShowCityList(false); }} className="w-full text-left p-4 hover:bg-indigo-600/20 text-xs font-bold text-slate-300 border-b border-white/5 transition-colors">
-                        <div className="flex flex-col"><span>{city.display}</span><span className="text-[8px] text-slate-500">LAT: {city.lat.toFixed(2)} / LON: {city.lon.toFixed(2)}</span></div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <p className="text-[10px] text-yellow-500 px-1 leading-relaxed">도시가 표시되지 않을 경우, 마지막 글자를 지우고 다시 입력하세요</p>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest px-1">Birth Manifestation (생년월일시)</label>
-                <div className="flex space-x-1.5 relative items-center">
-                  <input ref={yearRef} type="text" placeholder="YYYY" maxLength={4} value={birthYear} onChange={handleYearChange} className="w-[22%] bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-white text-center focus:border-indigo-500 outline-none font-bold" />
-                  <input ref={monthRef} type="text" placeholder="MM" maxLength={2} value={birthMonth} onChange={handleMonthChange} className="w-[16%] bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-white text-center focus:border-indigo-500 outline-none font-bold" />
-                  <input ref={dayRef} type="text" placeholder="DD" maxLength={2} value={birthDay} onChange={handleDayChange} className="w-[16%] bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-white text-center focus:border-indigo-500 outline-none font-bold" />
-                  <button type="button" onClick={() => { setShowTimePicker(!showTimePicker); setTimePickerStep('ampm'); }} className={`flex-1 min-w-0 bg-slate-950/50 border rounded-2xl p-4 text-white text-center font-bold flex items-center justify-center transition-all ${showTimePicker ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-800'}`}>
-                    <span className="text-[12px] whitespace-nowrap">{selectedAmPm} {selectedHour}:{selectedMinute} 🕒</span>
-                  </button>
-                  {showTimePicker && (
-                    <>
-                      <div className="fixed inset-0 z-40 bg-transparent" onClick={() => setShowTimePicker(false)}></div>
-                      <div className="absolute bottom-[4.5rem] right-0 w-80 p-6 rounded-3xl z-50 border border-indigo-500/30 shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-200 bg-slate-900/90 backdrop-blur-sm">
-                        {timePickerStep === 'ampm' && (
-                          <div className="space-y-3">
-                            <p className="text-[9px] font-black text-indigo-400 uppercase text-center mb-4 tracking-widest">Time Phase</p>
-                            <button type="button" onClick={() => handleSelectAmPm('오전')} className="w-full py-4 bg-indigo-600/10 border border-indigo-500/30 rounded-2xl text-sm font-black text-white hover:bg-indigo-600 transition-colors">오전 (AM)</button>
-                            <button type="button" onClick={() => handleSelectAmPm('오후')} className="w-full py-4 bg-pink-600/10 border border-pink-500/30 rounded-2xl text-sm font-black text-white hover:bg-pink-600 transition-colors">오후 (PM)</button>
-                          </div>
-                        )}
-                        {timePickerStep === 'hour' && (
-                          <div className="space-y-3">
-                            <p className="text-[9px] font-black text-indigo-400 uppercase text-center mb-4 tracking-widest">Select Hour</p>
-                            <div className="grid grid-cols-4 gap-2 h-56 overflow-y-auto pr-2 custom-scroll">
-                              {Array.from({length: 12}).map((_, i) => {
-                                const h = (i + 1).toString().padStart(2, '0');
-                                return <button key={h} type="button" onClick={() => handleSelectHour(h)} className={`py-3 rounded-xl text-xs font-black transition-all ${selectedHour === h ? 'bg-indigo-600 text-white' : 'bg-slate-900/50 text-slate-400 hover:bg-white/5'}`}>{h}시</button>;
-                              })}
-                              <button type="button" onClick={() => handleSelectHour('12')} className={`py-3 rounded-xl text-xs font-black transition-all ${selectedHour === '12' ? 'bg-indigo-600 text-white' : 'bg-slate-900/50 text-slate-400 hover:bg-white/5'}`}>12시</button>
-                            </div>
-                          </div>
-                        )}
-                        {timePickerStep === 'minute' && (
-                          <div className="space-y-3 text-center">
-                            <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">Select Precise Minute</p>
-                            <div className="grid grid-cols-6 gap-1.5 h-64 overflow-y-auto pr-2 custom-scroll">
-                              {Array.from({length: 60}).map((_, i) => {
-                                const m = i.toString().padStart(2, '0');
-                                return <button key={m} type="button" onClick={() => handleSelectMinute(m)} className={`py-2.5 rounded-lg text-[10px] font-black transition-all ${selectedMinute === m ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-900/50 text-slate-400 hover:bg-white/5'}`}>{m}</button>;
-                              })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-                {setupLunarText && (
-                  <p className="text-[10px] text-yellow-400 font-bold px-1">{setupLunarText}</p>
-                )}
-              </div>
-            </div>
-            <button ref={submitRef} type="submit" className="w-full py-6 bg-gradient-to-r from-indigo-600 to-pink-600 text-white font-black rounded-2xl shadow-2xl transition-all uppercase tracking-widest text-lg active:scale-95">운명의 문 열기</button>
-          </form>
-        </div>
-      </div>
-    );
+    return <ProfileSetupForm currentUser={currentUser} onComplete={setProfile} />;
   }
+
 
   return (
     <div className="min-h-screen bg-[#020617] pb-48 text-slate-200 overflow-x-hidden">
       {/* 프리미엄 연간 리포트 모달 */}
       {showFullAnnualReport && currentDestiny && (
-        <div className="fixed inset-0 z-[9000] flex items-start justify-center p-4 sm:p-8 bg-black/95 backdrop-blur-3xl animate-in fade-in duration-500 overflow-y-auto custom-scroll">
-          <div className="glass p-8 sm:p-20 rounded-[4rem] border border-amber-500/40 w-full max-w-6xl shadow-[0_0_200px_rgba(251,191,36,0.3)] space-y-20 relative my-10 bg-slate-950/40">
-            <button onClick={() => setShowFullAnnualReport(false)} className="absolute top-10 right-10 text-slate-500 hover:text-white transition-colors text-4xl z-[9001]">✕</button>
-            <div className="text-center space-y-8 pb-10 border-b border-white/5">
-              <div className="inline-flex items-center space-x-4 px-10 py-3 bg-amber-500/10 border border-amber-500/30 rounded-full">
-                <span className="w-3 h-3 bg-amber-500 rounded-full animate-pulse"></span>
-                <span className="text-sm font-black text-amber-500 uppercase tracking-[0.8em] ml-2">Premium Eternal Revelation</span>
-              </div>
-              <h2 className="text-6xl md:text-8xl font-mystic font-black text-transparent bg-clip-text bg-gradient-to-b from-white via-amber-200 to-amber-600 tracking-tight uppercase leading-tight pt-6 drop-shadow-glow">천명 대운 정밀 리포트</h2>
-              <p className="text-slate-400 text-xl font-black tracking-[0.6em] uppercase">{orb.nickname || profile.name} 님의 {currentDestiny.year}년 영적 동기화 완료</p>
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-               <div className="p-12 bg-gradient-to-br from-amber-500/10 via-slate-900/50 to-transparent rounded-[4rem] border border-amber-500/30 shadow-2xl space-y-10 flex flex-col items-center justify-center">
-                  <h3 className="text-amber-500 font-black text-sm uppercase tracking-widest mb-4">올해의 수호 천명수</h3>
-                  <div className="flex wrap justify-center gap-8">
-                     {currentDestiny.numbers.map((num, i) => (
-                       <div key={i} className="w-24 h-24 rounded-full bg-gradient-to-br from-amber-100 via-amber-500 to-amber-900 flex items-center justify-center text-slate-950 font-black text-4xl shadow-[0_15px_40px_rgba(251,191,36,0.5)] border-t-4 border-white/40">{num}</div>
-                     ))}
-                  </div>
-               </div>
-               <div className="p-12 bg-black/50 rounded-[4rem] border border-white/5 flex flex-col items-center justify-center space-y-8">
-                  <h3 className="text-slate-500 font-black text-xs uppercase tracking-widest">올해의 기운 보강 색상</h3>
-                  <div className="flex flex-col items-center space-y-6">
-                     <div className="w-24 h-24 rounded-3xl shadow-2xl border-4 border-white/10" style={{backgroundColor: currentDestiny.luckyColor || '#fff'}}></div>
-                     <p className="text-2xl font-black text-white">{currentDestiny.luckyColor}</p>
-                  </div>
-               </div>
-            </div>
-            <div className="p-14 bg-slate-900/80 rounded-[5rem] border border-white/10 shadow-2xl relative overflow-hidden group">
-               <h3 className="text-amber-400 font-mystic font-black text-3xl mb-12 uppercase tracking-widest">ANNUAL DESTINY SYNOPSIS</h3>
-               <p className="text-xl text-indigo-50/90 leading-[2.6] italic whitespace-pre-wrap first-letter:text-9xl first-letter:font-mystic first-letter:mr-8 first-letter:float-left first-letter:text-amber-500 first-letter:leading-none">{currentDestiny.reason}</p>
-            </div>
-            <div className="flex justify-center pt-10"><button onClick={() => setShowFullAnnualReport(false)} className="px-32 py-10 bg-gradient-to-r from-amber-600 via-yellow-500 to-amber-700 text-slate-950 font-black rounded-[3rem] shadow-2xl uppercase tracking-[0.5em] text-2xl border-t-4 border-white/40 hover:scale-105 transition-all">천상 계시 기록 보존</button></div>
-          </div>
-        </div>
+        <AnnualReportModal
+          destiny={currentDestiny}
+          displayName={orb.nickname || profile.name}
+          onClose={() => setShowFullAnnualReport(false)}
+        />
       )}
 
-      {isAdminModalOpen && (
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-black/80 backdrop-blur-xl animate-in fade-in duration-300">
-           <div className="glass p-10 rounded-[3rem] border border-indigo-500/30 w-full max-w-2xl shadow-2xl space-y-10 relative overflow-hidden flex flex-col max-h-[90vh]">
-              <button onClick={() => { resetAdminForm(); setIsAdminModalOpen(false); }} className="absolute top-8 right-8 text-slate-500 hover:text-white transition-colors text-2xl">✕</button>
-              <div className="text-center space-y-2">
-                 <h3 className="text-2xl font-mystic font-black text-indigo-400 tracking-widest uppercase">{isEditingExisting ? 'Admin: 번호 수정' : 'Admin: 당첨번호 등록'}</h3>
-                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Lotto History Management</p>
-              </div>
-              <div className="flex-1 overflow-y-auto pr-2 custom-scroll space-y-12">
-                 <div className="space-y-6">
-                    <div className="space-y-2">
-                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                         회차 {isEditingExisting ? '(수정 가능)' : '(자동 설정)'}
-                       </label>
-                       <input
-                         type="number"
-                         value={adminRound}
-                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => { if (isEditingExisting) setAdminRound(e.target.value.replace(/\D/g, '')); }}
-                         readOnly={!isEditingExisting}
-                         className={`w-full bg-slate-950/50 border rounded-xl p-4 text-white font-bold outline-none transition-all ${isEditingExisting ? 'border-indigo-500/60 focus:border-indigo-400' : 'border-slate-800 opacity-60 cursor-not-allowed select-none'}`}
-                       />
-                    </div>
-                    <div className="space-y-3">
-                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{isEditingExisting ? '번호별 수정' : '당첨번호 & 보너스 통합 입력 (예: 10. 20. ...)'}</label>
-                       <div className="space-y-4">
-                           <div className="flex wrap gap-2 p-3 bg-slate-950/50 border border-slate-800 rounded-2xl min-h-[64px] items-center">
-                              {adminNumbers.map((n, i) => n !== '' && (<span key={i} onClick={() => removeNumber(i, 'main')} className="px-4 py-2 bg-indigo-600 rounded-xl text-xs font-black text-white cursor-pointer hover:bg-indigo-500 transition-colors">{n} <span className="opacity-40 ml-1 text-[8px]">✕</span></span>))}
-                              {adminBonus !== '' && (<span onClick={() => removeNumber(0, 'bonus')} className="px-4 py-2 bg-amber-600 rounded-xl text-xs font-black text-slate-950 cursor-pointer hover:bg-amber-500 transition-colors">{adminBonus} <span className="opacity-40 ml-1 text-[8px]">B ✕</span></span>)}
-                              {(adminNumbers.some(n => n === '') || adminBonus === '') && (
-                                <input type="text" value={singleInputStr} onChange={handleSingleInputChange} className="flex-1 bg-transparent border-none outline-none text-white font-bold p-2 text-sm min-w-[80px]" placeholder="숫자 뒤 마침표(.) 입력" />
-                              )}
-                           </div>
-                           <p className="text-[9px] text-slate-600 font-bold italic uppercase px-1">※ 숫자를 치고 마침표(.)를 입력하면 자동으로 칸이 나뉩니다.</p>
-                       </div>
-                    </div>
-                    <div className="flex gap-3">
-                      <button onClick={handleRegisterLotto} className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-xl uppercase tracking-[0.2em] text-xs shadow-xl hover:bg-indigo-500 transition-all">{isEditingExisting ? '수정 사항 반영' : '번호 등록 및 갱신'}</button>
-                      {isEditingExisting && (
-                        <button onClick={resetAdminForm} className="px-6 py-4 bg-slate-700 text-slate-300 font-black rounded-xl text-xs hover:bg-slate-600 transition-all">취소</button>
-                      )}
-                    </div>
-                 </div>
-                 <div className="space-y-6">
-                    <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-white/5 pb-2">최근 관리</h4>
-                    <div className="space-y-3">
-                       {lottoHistory.slice(0, 5).map((round: LottoRound) => {
-                         const lastRound = lottoHistory.length > 0 ? lottoHistory[0].round : null;
-                         return (
-                           <div key={round.round} className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5 group hover:border-indigo-500/20 transition-all">
-                              <span className="text-[11px] font-black text-indigo-400 uppercase w-12">{round.round}회</span>
-                              <div className="flex space-x-2">
-                                 {round.numbers.map(n => <span key={n} className="w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-bold">{n}</span>)}
-                                 <span className="w-7 h-7 rounded-full bg-indigo-900/50 flex items-center justify-center text-[10px] font-bold text-indigo-200">{round.bonus}</span>
-                              </div>
-                              <div className="flex space-x-2">
-                                <button onClick={() => handleEditRound(round)} className="px-4 py-2 bg-white/5 rounded-lg text-[10px] font-black text-slate-400 hover:text-white transition-all">수정</button>
-                                {round.round === lastRound && (
-                                  <button onClick={() => setDeleteConfirmRound(round.round)} className="px-4 py-2 bg-rose-900/20 rounded-lg text-[10px] font-black text-rose-400 hover:text-white transition-all">삭제</button>
-                                )}
-                              </div>
-                           </div>
-                         );
-                       })}
-                    </div>
-                 </div>
-                 {/* ── 부관리자 관리 ── */}
-                 <div className="space-y-6">
-                    <h4 className="text-[10px] font-black text-purple-400 uppercase tracking-widest border-b border-purple-500/20 pb-2">부관리자 관리</h4>
-                    <div className="space-y-3">
-                       <input
-                         type="text"
-                         value={newSubAdminUid}
-                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewSubAdminUid(e.target.value)}
-                         className="w-full bg-slate-950/50 border border-slate-700 rounded-xl p-3 text-white font-mono text-xs outline-none focus:border-purple-500 transition-all"
-                         placeholder="Firebase UID 입력"
-                       />
-                       <div className="flex gap-2">
-                         <input
-                           type="number"
-                           value={newSubAdminPoints}
-                           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewSubAdminPoints(e.target.value)}
-                           className="flex-1 bg-slate-950/50 border border-slate-700 rounded-xl p-3 text-white font-bold text-xs outline-none focus:border-purple-500 transition-all"
-                           placeholder="부여할 루멘 수치"
-                           min="0"
-                         />
-                         <button
-                           onClick={handleAppointSubAdmin}
-                           disabled={subAdminActionLoading || !newSubAdminUid.trim() || !newSubAdminPoints}
-                           className="px-5 py-3 bg-purple-600 text-white font-black rounded-xl text-xs hover:bg-purple-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                         >임명</button>
-                       </div>
-                    </div>
-                    {Object.keys(subAdminConfig).length > 0 ? (
-                      <div className="space-y-2">
-                        {Object.entries(subAdminConfig).map(([uid, pts]) => (
-                          <div key={uid} className="flex items-center justify-between p-3 bg-purple-900/10 rounded-xl border border-purple-500/10">
-                            <div className="space-y-0.5">
-                              <p className="font-mono text-[10px] text-purple-300 break-all">{uid}</p>
-                              <p className="text-[9px] text-slate-500">루멘 {pts.toLocaleString()} · Lv.{SUB_ADMIN_LEVEL}</p>
-                            </div>
-                            <button
-                              onClick={() => handleDismissSubAdmin(uid)}
-                              disabled={subAdminActionLoading}
-                              className="ml-3 px-3 py-2 bg-rose-900/30 rounded-lg text-[10px] font-black text-rose-400 hover:text-white hover:bg-rose-700/40 transition-all shrink-0 disabled:opacity-40"
-                            >해임</button>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-[10px] text-slate-600 italic text-center">임명된 부관리자가 없습니다.</p>
-                    )}
-                 </div>
-              </div>
-              <button onClick={() => { resetAdminForm(); setIsAdminModalOpen(false); }} className="w-full py-5 bg-slate-800 text-white font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-slate-700 transition-all shrink-0">관리 종료</button>
-              {deleteConfirmRound && (
-                <div className="absolute inset-0 z-[11000] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-200">
-                  <div className="glass p-10 rounded-[3rem] border border-rose-500/30 max-sm w-full text-center space-y-8 shadow-[0_0_50px_rgba(244,63,94,0.2)]">
-                    <div className="text-4xl">⚠️</div>
-                    <p className="text-sm text-slate-400 leading-relaxed italic">"{deleteConfirmRound}회차 정보를 영구히 소멸시키시겠습니까?"</p>
-                    <div className="flex flex-col gap-3">
-                      <button onClick={() => handleDeleteRoundAction(deleteConfirmRound)} className="w-full py-4 bg-rose-600 text-white font-black rounded-xl uppercase tracking-widest text-xs">확인</button>
-                      <button onClick={() => setDeleteConfirmRound(null)} className="w-full py-4 bg-white/5 text-slate-500 font-black rounded-xl uppercase tracking-widest text-xs">취소</button>
-                    </div>
-                  </div>
-                </div>
-              )}
-           </div>
-        </div>
-      )}
+      <AdminModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
+        lottoHistory={lottoHistory}
+        subAdminConfig={subAdminConfig}
+        onSubAdminConfigChange={setSubAdminConfig}
+        onToast={onToast}
+      />
 
-      {view === 'square' && <CelestialSquare profile={profile} orb={orb} onUpdatePoints={updatePoints} onUpdateFavorites={updateFavorites} onBack={() => setView('main')} onToast={onToast} />}
+      {view === 'square' && <CelestialSquare profile={profile} orb={orb} onUpdatePoints={updatePoints} onUpdateFavorites={updateFavorites} onBack={() => setView('main')} onToast={onToast} onGrowFromPost={handlePostCreated} isAdmin={isAdmin} />}
       {view === 'profile' && <UserProfilePage profile={profile} orb={orb} archives={archives} onUpdateProfile={onUpdateProfile} onUpdateOrb={onUpdateOrb} onWithdraw={handleWithdrawAction} onBack={() => setView('main')} onToast={onToast} isAdmin={isAdmin} />}
       {view === 'analysis' && <MysticAnalysisLab lottoHistory={lottoHistory} onBack={() => setView('main')} />}
       {offeringData && <DivineEffect amount={offeringData.amount} multiplier={offeringData.multiplier} onComplete={handleOfferingComplete} />}
@@ -1063,7 +693,7 @@ const App: React.FC = () => {
                   <button onClick={() => { setView('square'); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-indigo-600/20 text-indigo-100 text-xs font-black uppercase transition-all"><span>🌌</span><span>천상의 광장 가기</span></button>
                   <button onClick={() => { setView('analysis'); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-cyan-600/20 text-cyan-100 text-xs font-black uppercase transition-all"><span>📊</span><span>미스틱 분석 제단</span></button>
                   {isAdmin && (
-                    <button onClick={() => { const next = lottoHistory.length > 0 ? lottoHistory[0].round + 1 : 1; setAdminRound(next.toString()); setIsAdminModalOpen(true); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-amber-600/20 text-amber-100 text-xs font-black uppercase transition-all"><span>🎫</span><span>당첨번호 등록 (Admin)</span></button>
+                    <button onClick={() => { setIsAdminModalOpen(true); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-amber-600/20 text-amber-100 text-xs font-black uppercase transition-all"><span>🎫</span><span>당첨번호 등록 (Admin)</span></button>
                   )}
                   <div className="h-[1px] bg-white/5 my-1"></div>
                   <button onClick={async () => { await logout(); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-red-600/20 text-red-100 text-xs font-black uppercase transition-all"><span>🚪</span><span>로그아웃</span></button>
@@ -1088,7 +718,7 @@ const App: React.FC = () => {
         {activeTab === 'orb' && (
           <div className="space-y-24">
             <section className="relative flex flex-col items-center animate-in fade-in duration-700">
-              <FortuneOrb orb={orb} onGrow={() => { growOrb(5); addPoints(50); }} />
+              <FortuneOrb orb={orb} onGrow={handleOrbTap} />
               <button onClick={() => setShowShop(!showShop)} className="mt-10 px-10 py-4 bg-indigo-500/10 border-2 border-indigo-500/30 rounded-full text-sm font-black text-indigo-200 hover:bg-indigo-500/20 transition-all flex items-center space-x-3 shadow-2xl backdrop-blur-xl"><span>✨</span><span className="tracking-[0.2em] uppercase">신비의 상점</span><span className="bg-indigo-500 text-white px-3 py-1 rounded-full text-[10px] ml-4">{displayPoints(orb.points)} L</span></button>
               {showShop && (
                 <div className="absolute top-28 right-0 md:right-1/2 md:translate-x-1/2 w-80 glass p-8 rounded-[3rem] z-40 border-indigo-500/40 shadow-2xl animate-in fade-in zoom-in duration-300 max-h-[60vh] overflow-y-auto">

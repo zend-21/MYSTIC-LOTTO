@@ -3,11 +3,20 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
 import { GoogleGenAI, Type } from "@google/genai";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 admin.initializeApp();
 const db = admin.firestore();
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
+
+// ── R2 Secrets ──────────────────────────────────────────────────
+const R2_ACCOUNT_ID = defineSecret("R2_ACCOUNT_ID");
+const R2_ACCESS_KEY_ID = defineSecret("R2_ACCESS_KEY_ID");
+const R2_SECRET_ACCESS_KEY = defineSecret("R2_SECRET_ACCESS_KEY");
+const R2_BUCKET_NAME = defineSecret("R2_BUCKET_NAME");
+const R2_PUBLIC_URL = defineSecret("R2_PUBLIC_URL");
 
 // ── 포인트 비용 상수 ──────────────────────────────────────────
 const COST_DIVINE = 1000;
@@ -32,6 +41,26 @@ async function deductPoints(
   tx.update(userRef, { "orb.points": admin.firestore.FieldValue.increment(-amount) });
 }
 
+// ── AI 호출 실패 시 1회 자동 재시도 ──────────────────────────
+async function callWithRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch {
+    await new Promise<void>(r => setTimeout(r, 2000));
+    return await fn();
+  }
+}
+
+// ── 루멘 잔액 사전 확인 (AI 호출 전 빠른 오류 반환) ───────────
+async function checkBalance(uid: string, amount: number): Promise<void> {
+  if (uid === ADMIN_UID) return;
+  const snap = await db.collection("users").doc(uid).get();
+  if (!snap.exists) throw new HttpsError("not-found", "사용자 데이터를 찾을 수 없습니다.");
+  if ((snap.data()?.orb?.points ?? 0) < amount) {
+    throw new HttpsError("failed-precondition", "루멘이 부족합니다.");
+  }
+}
+
 // ──────────────────────────────────────────────
 // 오늘의 운세 + 로또번호 (COST: 1,000 루멘)
 // ──────────────────────────────────────────────
@@ -41,12 +70,10 @@ export const getFortuneAndNumbers = onCall(
     if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
     const uid = request.auth.uid;
 
-    // ① 포인트 차감 (원자적 트랜잭션)
-    await db.runTransaction(async (tx) => {
-      await deductPoints(uid, COST_DIVINE, tx);
-    });
+    // ① 잔액 사전 확인 (AI 호출 전 빠른 오류 반환)
+    await checkBalance(uid, COST_DIVINE);
 
-    // ② AI 호출
+    // ② AI 호출 (실패 시 1회 자동 재시도)
     const profile = request.data;
     if (!profile || !profile.name) {
       throw new HttpsError("invalid-argument", "프로필 정보가 필요합니다.");
@@ -93,7 +120,7 @@ export const getFortuneAndNumbers = onCall(
     9. 'recommendationReason': 오늘 하루 전체를 관통하는 운명의 핵심 전언.
   `;
 
-    const response = await ai.models.generateContent({
+    const response = await callWithRetry(() => ai.models.generateContent({
       model: "gemini-3-pro-preview",
       contents: prompt,
       config: {
@@ -147,11 +174,20 @@ export const getFortuneAndNumbers = onCall(
           ],
         },
       },
-    });
+    }));
 
     const text = response.text;
     if (!text) throw new HttpsError("internal", "AI 응답이 비어있습니다.");
-    return JSON.parse(text);
+    const result = JSON.parse(text);
+
+    // ③ AI 성공 후에만 루멘 차감 + 결과 Firestore 저장 (트랜잭션)
+    const sessionRef = db.collection("users").doc(uid).collection("session").doc("data");
+    await db.runTransaction(async (tx) => {
+      await deductPoints(uid, COST_DIVINE, tx);
+      tx.set(sessionRef, { divine: { data: result, savedAt: Date.now(), viewed: false } }, { merge: true });
+    });
+
+    return result;
   }
 );
 
@@ -164,12 +200,10 @@ export const getScientificReport = onCall(
     if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
     const uid = request.auth.uid;
 
-    // ① 포인트 차감
-    await db.runTransaction(async (tx) => {
-      await deductPoints(uid, COST_SCIENCE, tx);
-    });
+    // ① 잔액 사전 확인
+    await checkBalance(uid, COST_SCIENCE);
 
-    // ② AI 호출
+    // ② AI 호출 (실패 시 1회 자동 재시도)
     const { candidate, metrics, engineLabel, algorithmMode, bradfordSets } = request.data;
 
     if (!candidate || !metrics) {
@@ -197,12 +231,14 @@ export const getScientificReport = onCall(
       1. 엔진 설명 — ${engineContext}
       2. 벤포드 적합도(${(metrics as any).benfordScore}점)가 주는 통계적 정합성과 산술 복잡도(AC) ${(metrics as any).acValue}의 신뢰성을 전문적으로 설명하세요.
       3. "미스틱 로또 연구실 AI 분석팀"으로 마무리하고 면책 조항을 포함하세요.
+      3. 정규분포 Z-Score(${(metrics as any).sumZScore}σ)를 언급하며, 이 조합의 합계가 통계적 평균(138)에서 얼마나 벗어나 있는지(안정적인지 혹은 변동성이 큰지) 평가하세요.
+      4. "미스틱 로또 연구실 AI 분석팀"으로 마무리하고 면책 조항을 포함하세요.
     `;
 
-    const response = await ai.models.generateContent({
+    const response = await callWithRetry(() => ai.models.generateContent({
       model: "gemini-3-pro-preview",
       contents: prompt,
-    });
+    }));
 
     let finalReport = response.text || "지성 분석 결과를 도출하지 못했습니다.";
 
@@ -213,6 +249,13 @@ export const getScientificReport = onCall(
         .join("\n");
       finalReport += `\n\n【 브래드포드 100% 커버리지 보완 세트 】\n당첨 확률의 그물을 완성하기 위해 함께 구매를 권장하는 나머지 7개 조합입니다:\n\n${otherSets}\n\n※ 위 8개 조합을 모두 구매할 경우 이번 회차의 모든 번호(1~45)가 당신의 티켓 뭉치 안에 반드시 존재하게 됩니다.`;
     }
+
+    // ③ AI 성공 후에만 루멘 차감 + 결과 저장
+    const sessionRef = db.collection("users").doc(uid).collection("session").doc("data");
+    await db.runTransaction(async (tx) => {
+      await deductPoints(uid, COST_SCIENCE, tx);
+      tx.set(sessionRef, { science: { data: finalReport, savedAt: Date.now(), viewed: false } }, { merge: true });
+    });
 
     return { finalReport };
   }
@@ -227,12 +270,10 @@ export const getFixedDestinyNumbers = onCall(
     if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
     const uid = request.auth.uid;
 
-    // ① 포인트 차감
-    await db.runTransaction(async (tx) => {
-      await deductPoints(uid, COST_ANNUAL, tx);
-    });
+    // ① 잔액 사전 확인
+    await checkBalance(uid, COST_ANNUAL);
 
-    // ② AI 호출
+    // ② AI 호출 (실패 시 1회 자동 재시도)
     const profile = request.data;
     if (!profile || !profile.name) {
       throw new HttpsError("invalid-argument", "프로필 정보가 필요합니다.");
@@ -276,7 +317,7 @@ export const getFixedDestinyNumbers = onCall(
     - 'sajuDeepDive': 음력 설 기준 세운 분석.
   `;
 
-    const response = await ai.models.generateContent({
+    const response = await callWithRetry(() => ai.models.generateContent({
       model: "gemini-3-pro-preview",
       contents: prompt,
       config: {
@@ -334,11 +375,20 @@ export const getFixedDestinyNumbers = onCall(
           ],
         },
       },
-    });
+    }));
 
     const text = response.text;
     if (!text) throw new HttpsError("internal", "AI 응답이 비어있습니다.");
-    return JSON.parse(text);
+    const result = JSON.parse(text);
+
+    // ③ AI 성공 후에만 루멘 차감 + 결과 저장 (트랜잭션)
+    const sessionRef = db.collection("users").doc(uid).collection("session").doc("data");
+    await db.runTransaction(async (tx) => {
+      await deductPoints(uid, COST_ANNUAL, tx);
+      tx.set(sessionRef, { annual: { data: result, savedAt: Date.now(), viewed: false } }, { merge: true });
+    });
+
+    return result;
   }
 );
 
@@ -411,5 +461,46 @@ export const cleanupExpiredRooms = onSchedule(
     } else {
       console.log("cleanupExpiredRooms: 삭제할 방 없음");
     }
+  }
+);
+
+// ──────────────────────────────────────────────────────────────
+// R2 이미지 업로드용 Presigned URL 발급
+// ──────────────────────────────────────────────────────────────
+export const getR2UploadUrl = onCall(
+  {
+    secrets: [R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME, R2_PUBLIC_URL],
+    region: "asia-northeast3",
+  },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+
+    const { fileName, contentType } = request.data as { fileName: string; contentType: string };
+    if (!contentType || !contentType.startsWith("image/")) {
+      throw new HttpsError("invalid-argument", "이미지 파일만 업로드 가능합니다.");
+    }
+
+    const ext = (fileName.split(".").pop() ?? "jpg").toLowerCase();
+    const key = `board-images/${request.auth.uid}/${Date.now()}.${ext}`;
+
+    const s3 = new S3Client({
+      region: "auto",
+      endpoint: `https://${R2_ACCOUNT_ID.value()}.r2.cloudflarestorage.com`,
+      credentials: {
+        accessKeyId: R2_ACCESS_KEY_ID.value(),
+        secretAccessKey: R2_SECRET_ACCESS_KEY.value(),
+      },
+    });
+
+    const command = new PutObjectCommand({
+      Bucket: R2_BUCKET_NAME.value(),
+      Key: key,
+      ContentType: contentType,
+    });
+
+    const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 300 });
+    const publicUrl = `${R2_PUBLIC_URL.value()}/${key}`;
+
+    return { uploadUrl, publicUrl };
   }
 );

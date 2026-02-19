@@ -187,10 +187,13 @@ export interface OrbState {
   hasGoldenCard: boolean; 
   goldenCardId?: string; 
   annualDestinies?: { [year: number]: AnnualDestiny };
-  dailyExtractCount: number; 
-  lastExtractDate: string; 
-  favoriteRoomIds: string[]; 
-  purchasedDecorationIds: string[]; 
+  dailyExtractCount: number;
+  lastExtractDate: string;
+  favoriteRoomIds: string[];
+  purchasedDecorationIds: string[];
+  lastVisitDate?: string;
+  dailyOrbTapExp?: number;
+  dailyPostCount?: number;
 }
 
 export interface ChatMessage {
@@ -223,18 +226,27 @@ export interface BoardComment {
   createdAt: number;
 }
 
+export interface ContentBlock {
+  type: 'text' | 'image';
+  value: string;
+}
+
 export interface BoardPost {
   id: string;
   title: string;
-  content: string;
+  content?: string;
+  blocks?: ContentBlock[];
   authorName: string;
   authorLevel: number;
+  authorId?: string;
+  postNumber?: number;
   views: number;
   likes: number;
+  likedBy?: string[];
   createdAt: number;
   isNotice: boolean;
   mediaUrl?: string;
-  mediaType?: 'image' | 'video';
+  mediaType?: 'image' | 'video' | 'youtube';
   comments: BoardComment[];
 }
 
@@ -252,4 +264,4 @@ export const COST_DIVINE = 1000;
 export const COST_SCIENCE = 1000;
 export const COST_ANNUAL = 50000;
 export const COST_ROOM_CREATE = 1000;
-export const INITIAL_POINTS = 100000;
+export const INITIAL_POINTS = 30000;

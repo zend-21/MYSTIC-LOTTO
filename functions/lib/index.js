@@ -1,14 +1,22 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cleanupExpiredRooms = exports.spendPoints = exports.getFixedDestinyNumbers = exports.getScientificReport = exports.getFortuneAndNumbers = void 0;
+exports.getR2UploadUrl = exports.cleanupExpiredRooms = exports.spendPoints = exports.getFixedDestinyNumbers = exports.getScientificReport = exports.getFortuneAndNumbers = void 0;
 const admin = require("firebase-admin");
 const https_1 = require("firebase-functions/v2/https");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const params_1 = require("firebase-functions/params");
 const genai_1 = require("@google/genai");
+const client_s3_1 = require("@aws-sdk/client-s3");
+const s3_request_presigner_1 = require("@aws-sdk/s3-request-presigner");
 admin.initializeApp();
 const db = admin.firestore();
 const GEMINI_API_KEY = (0, params_1.defineSecret)("GEMINI_API_KEY");
+// ── R2 Secrets ──────────────────────────────────────────────────
+const R2_ACCOUNT_ID = (0, params_1.defineSecret)("R2_ACCOUNT_ID");
+const R2_ACCESS_KEY_ID = (0, params_1.defineSecret)("R2_ACCESS_KEY_ID");
+const R2_SECRET_ACCESS_KEY = (0, params_1.defineSecret)("R2_SECRET_ACCESS_KEY");
+const R2_BUCKET_NAME = (0, params_1.defineSecret)("R2_BUCKET_NAME");
+const R2_PUBLIC_URL = (0, params_1.defineSecret)("R2_PUBLIC_URL");
 // ── 포인트 비용 상수 ──────────────────────────────────────────
 const COST_DIVINE = 1000;
 const COST_SCIENCE = 1000;
@@ -29,6 +37,28 @@ async function deductPoints(uid, amount, tx) {
     }
     tx.update(userRef, { "orb.points": admin.firestore.FieldValue.increment(-amount) });
 }
+// ── AI 호출 실패 시 1회 자동 재시도 ──────────────────────────
+async function callWithRetry(fn) {
+    try {
+        return await fn();
+    }
+    catch (_a) {
+        await new Promise(r => setTimeout(r, 2000));
+        return await fn();
+    }
+}
+// ── 루멘 잔액 사전 확인 (AI 호출 전 빠른 오류 반환) ───────────
+async function checkBalance(uid, amount) {
+    var _a, _b, _c;
+    if (uid === ADMIN_UID)
+        return;
+    const snap = await db.collection("users").doc(uid).get();
+    if (!snap.exists)
+        throw new https_1.HttpsError("not-found", "사용자 데이터를 찾을 수 없습니다.");
+    if (((_c = (_b = (_a = snap.data()) === null || _a === void 0 ? void 0 : _a.orb) === null || _b === void 0 ? void 0 : _b.points) !== null && _c !== void 0 ? _c : 0) < amount) {
+        throw new https_1.HttpsError("failed-precondition", "루멘이 부족합니다.");
+    }
+}
 // ──────────────────────────────────────────────
 // 오늘의 운세 + 로또번호 (COST: 1,000 루멘)
 // ──────────────────────────────────────────────
@@ -36,11 +66,9 @@ exports.getFortuneAndNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], 
     if (!request.auth)
         throw new https_1.HttpsError("unauthenticated", "로그인이 필요합니다.");
     const uid = request.auth.uid;
-    // ① 포인트 차감 (원자적 트랜잭션)
-    await db.runTransaction(async (tx) => {
-        await deductPoints(uid, COST_DIVINE, tx);
-    });
-    // ② AI 호출
+    // ① 잔액 사전 확인 (AI 호출 전 빠른 오류 반환)
+    await checkBalance(uid, COST_DIVINE);
+    // ② AI 호출 (실패 시 1회 자동 재시도)
     const profile = request.data;
     if (!profile || !profile.name) {
         throw new https_1.HttpsError("invalid-argument", "프로필 정보가 필요합니다.");
@@ -79,7 +107,7 @@ exports.getFortuneAndNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], 
     8. 'coreNumbersDescription': 핵심 숫자 2개의 선정 이유를 사주/타로/점성술 관점에서 통합 설명.
     9. 'recommendationReason': 오늘 하루 전체를 관통하는 운명의 핵심 전언.
   `;
-    const response = await ai.models.generateContent({
+    const response = await callWithRetry(() => ai.models.generateContent({
         model: "gemini-3-pro-preview",
         contents: prompt,
         config: {
@@ -133,11 +161,18 @@ exports.getFortuneAndNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], 
                 ],
             },
         },
-    });
+    }));
     const text = response.text;
     if (!text)
         throw new https_1.HttpsError("internal", "AI 응답이 비어있습니다.");
-    return JSON.parse(text);
+    const result = JSON.parse(text);
+    // ③ AI 성공 후에만 루멘 차감 + 결과 Firestore 저장 (트랜잭션)
+    const sessionRef = db.collection("users").doc(uid).collection("session").doc("data");
+    await db.runTransaction(async (tx) => {
+        await deductPoints(uid, COST_DIVINE, tx);
+        tx.set(sessionRef, { divine: { data: result, savedAt: Date.now(), viewed: false } }, { merge: true });
+    });
+    return result;
 });
 // ──────────────────────────────────────────────
 // 지성 분석 리포트 (COST: 1,000 루멘)
@@ -146,11 +181,9 @@ exports.getScientificReport = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], r
     if (!request.auth)
         throw new https_1.HttpsError("unauthenticated", "로그인이 필요합니다.");
     const uid = request.auth.uid;
-    // ① 포인트 차감
-    await db.runTransaction(async (tx) => {
-        await deductPoints(uid, COST_SCIENCE, tx);
-    });
-    // ② AI 호출
+    // ① 잔액 사전 확인
+    await checkBalance(uid, COST_SCIENCE);
+    // ② AI 호출 (실패 시 1회 자동 재시도)
     const { candidate, metrics, engineLabel, algorithmMode, bradfordSets } = request.data;
     if (!candidate || !metrics) {
         throw new https_1.HttpsError("invalid-argument", "분석 데이터가 필요합니다.");
@@ -174,11 +207,13 @@ exports.getScientificReport = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], r
       1. 엔진 설명 — ${engineContext}
       2. 벤포드 적합도(${metrics.benfordScore}점)가 주는 통계적 정합성과 산술 복잡도(AC) ${metrics.acValue}의 신뢰성을 전문적으로 설명하세요.
       3. "미스틱 로또 연구실 AI 분석팀"으로 마무리하고 면책 조항을 포함하세요.
+      3. 정규분포 Z-Score(${metrics.sumZScore}σ)를 언급하며, 이 조합의 합계가 통계적 평균(138)에서 얼마나 벗어나 있는지(안정적인지 혹은 변동성이 큰지) 평가하세요.
+      4. "미스틱 로또 연구실 AI 분석팀"으로 마무리하고 면책 조항을 포함하세요.
     `;
-    const response = await ai.models.generateContent({
+    const response = await callWithRetry(() => ai.models.generateContent({
         model: "gemini-3-pro-preview",
         contents: prompt,
-    });
+    }));
     let finalReport = response.text || "지성 분석 결과를 도출하지 못했습니다.";
     if (algorithmMode === "BradfordLegacy" && bradfordSets && bradfordSets.length > 0) {
         const otherSets = bradfordSets
@@ -187,6 +222,12 @@ exports.getScientificReport = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], r
             .join("\n");
         finalReport += `\n\n【 브래드포드 100% 커버리지 보완 세트 】\n당첨 확률의 그물을 완성하기 위해 함께 구매를 권장하는 나머지 7개 조합입니다:\n\n${otherSets}\n\n※ 위 8개 조합을 모두 구매할 경우 이번 회차의 모든 번호(1~45)가 당신의 티켓 뭉치 안에 반드시 존재하게 됩니다.`;
     }
+    // ③ AI 성공 후에만 루멘 차감 + 결과 저장
+    const sessionRef = db.collection("users").doc(uid).collection("session").doc("data");
+    await db.runTransaction(async (tx) => {
+        await deductPoints(uid, COST_SCIENCE, tx);
+        tx.set(sessionRef, { science: { data: finalReport, savedAt: Date.now(), viewed: false } }, { merge: true });
+    });
     return { finalReport };
 });
 // ──────────────────────────────────────────────
@@ -196,11 +237,9 @@ exports.getFixedDestinyNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY]
     if (!request.auth)
         throw new https_1.HttpsError("unauthenticated", "로그인이 필요합니다.");
     const uid = request.auth.uid;
-    // ① 포인트 차감
-    await db.runTransaction(async (tx) => {
-        await deductPoints(uid, COST_ANNUAL, tx);
-    });
-    // ② AI 호출
+    // ① 잔액 사전 확인
+    await checkBalance(uid, COST_ANNUAL);
+    // ② AI 호출 (실패 시 1회 자동 재시도)
     const profile = request.data;
     if (!profile || !profile.name) {
         throw new https_1.HttpsError("invalid-argument", "프로필 정보가 필요합니다.");
@@ -237,7 +276,7 @@ exports.getFixedDestinyNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY]
     - 'astrologyDetailed': 목성과 토성의 이동, 사용자 하우스의 변화를 포함한 점성학적 연간 트랜짓 리포트.
     - 'sajuDeepDive': 음력 설 기준 세운 분석.
   `;
-    const response = await ai.models.generateContent({
+    const response = await callWithRetry(() => ai.models.generateContent({
         model: "gemini-3-pro-preview",
         contents: prompt,
         config: {
@@ -295,11 +334,18 @@ exports.getFixedDestinyNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY]
                 ],
             },
         },
-    });
+    }));
     const text = response.text;
     if (!text)
         throw new https_1.HttpsError("internal", "AI 응답이 비어있습니다.");
-    return JSON.parse(text);
+    const result = JSON.parse(text);
+    // ③ AI 성공 후에만 루멘 차감 + 결과 저장 (트랜잭션)
+    const sessionRef = db.collection("users").doc(uid).collection("session").doc("data");
+    await db.runTransaction(async (tx) => {
+        await deductPoints(uid, COST_ANNUAL, tx);
+        tx.set(sessionRef, { annual: { data: result, savedAt: Date.now(), viewed: false } }, { merge: true });
+    });
+    return result;
 });
 // ──────────────────────────────────────────────
 // 범용 포인트 차감 (방 개설, 즉시 소멸, 황금카드, 장식 구매)
@@ -357,5 +403,38 @@ exports.cleanupExpiredRooms = (0, scheduler_1.onSchedule)({ schedule: "0 15 * * 
     else {
         console.log("cleanupExpiredRooms: 삭제할 방 없음");
     }
+});
+// ──────────────────────────────────────────────────────────────
+// R2 이미지 업로드용 Presigned URL 발급
+// ──────────────────────────────────────────────────────────────
+exports.getR2UploadUrl = (0, https_1.onCall)({
+    secrets: [R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME, R2_PUBLIC_URL],
+    region: "asia-northeast3",
+}, async (request) => {
+    var _a;
+    if (!request.auth)
+        throw new https_1.HttpsError("unauthenticated", "로그인이 필요합니다.");
+    const { fileName, contentType } = request.data;
+    if (!contentType || !contentType.startsWith("image/")) {
+        throw new https_1.HttpsError("invalid-argument", "이미지 파일만 업로드 가능합니다.");
+    }
+    const ext = ((_a = fileName.split(".").pop()) !== null && _a !== void 0 ? _a : "jpg").toLowerCase();
+    const key = `board-images/${request.auth.uid}/${Date.now()}.${ext}`;
+    const s3 = new client_s3_1.S3Client({
+        region: "auto",
+        endpoint: `https://${R2_ACCOUNT_ID.value()}.r2.cloudflarestorage.com`,
+        credentials: {
+            accessKeyId: R2_ACCESS_KEY_ID.value(),
+            secretAccessKey: R2_SECRET_ACCESS_KEY.value(),
+        },
+    });
+    const command = new client_s3_1.PutObjectCommand({
+        Bucket: R2_BUCKET_NAME.value(),
+        Key: key,
+        ContentType: contentType,
+    });
+    const uploadUrl = await (0, s3_request_presigner_1.getSignedUrl)(s3, command, { expiresIn: 300 });
+    const publicUrl = `${R2_PUBLIC_URL.value()}/${key}`;
+    return { uploadUrl, publicUrl };
 });
 //# sourceMappingURL=index.js.map
