@@ -21,7 +21,7 @@ const SacredOffering: React.FC<SacredOfferingProps> = ({ onOffer }) => {
            <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse shadow-[0_0_10px_#f59e0b]"></span>
            <span className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Cosmic Offering Ritual</span>
         </div>
-        <h2 className="text-6xl font-mystic font-black text-transparent bg-clip-text bg-gradient-to-b from-white via-amber-200 to-amber-600 tracking-[0.2em] uppercase drop-shadow-2xl pt-[15px]">천상의 봉헌 제단</h2>
+        <h2 className="text-3xl md:text-4xl font-mystic font-black text-transparent bg-clip-text bg-gradient-to-b from-white via-amber-200 to-amber-600 tracking-[0.2em] uppercase drop-shadow-2xl pt-[15px]">천상의 봉헌 제단</h2>
         <p className="text-slate-400 text-sm italic font-medium max-w-xl mx-auto leading-relaxed">
           "당신의 작은 행운을 하늘에 봉헌하여, 더 큰 천운의 씨앗을 심으십시오."
         </p>

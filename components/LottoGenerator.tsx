@@ -217,13 +217,23 @@ const LottoGenerator: React.FC<LottoGeneratorProps> = ({ result, loading, onGene
                     <p className="text-sm text-indigo-200 leading-relaxed font-bold italic">"사주, 타로, 점성술의 에너지가 당신의 탄생 기운과 결합되어 도출된 궁극의 계시입니다."</p>
                  </div>
 
-                 {/* 행운의 수 상세 설명 섹션 - 핵심 숫자 2개만 표시 */}
+                 {/* 오늘의 행운 번호 전체 표시 */}
+                 <div className="p-8 bg-amber-500/5 rounded-3xl border border-amber-500/20 space-y-4">
+                    <p className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em] text-center">Fate Consolidated — 오늘의 행운 번호</p>
+                    <div className="flex justify-center flex-wrap gap-4">
+                       {result.luckyNumbers.map((num, i) => (
+                          <div key={i} className={`w-14 h-14 rounded-full flex items-center justify-center font-black text-xl shadow-xl border-2 ${result.coreNumbers.includes(num) ? 'bg-gradient-to-br from-amber-300 to-amber-600 text-slate-950 border-amber-400' : 'bg-slate-800 text-slate-300 border-slate-700'}`}>{num}</div>
+                       ))}
+                    </div>
+                 </div>
+
+                 {/* 핵심 번호 상세 설명 섹션 */}
                  <section className="space-y-6">
                     <div className="flex items-center space-x-4">
                        <h4 className="text-amber-500 font-black text-xl uppercase tracking-widest">💎 핵심 행운의 수(Core) 풀이</h4>
                        <div className="h-[1px] flex-1 bg-amber-500/20"></div>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 gap-6">
                        {result.numberExplanations?.filter(ex => result.coreNumbers.includes(ex.number)).map((item, idx) => (
                           <div key={idx} className="p-8 bg-white/5 rounded-3xl border-2 border-amber-500/30 space-y-4 relative overflow-hidden shadow-2xl">
                              <div className="absolute -top-4 -right-4 w-24 h-24 bg-amber-500/10 rounded-full blur-2xl"></div>
@@ -268,7 +278,7 @@ const LottoGenerator: React.FC<LottoGeneratorProps> = ({ result, loading, onGene
                  </div>
 
                  {/* 기존 운세 섹션들 */}
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                 <div className="grid grid-cols-1 gap-6">
                     <section className="space-y-3 p-8 bg-slate-900 rounded-3xl border border-white/5">
                        <h4 className="text-amber-400 font-black text-sm uppercase tracking-wider flex items-center space-x-2"><span>🌟</span><span>종합운 해설</span></h4>
                        <p className="text-[13px] text-indigo-50/90 leading-relaxed italic">{result.overallFortune}</p>

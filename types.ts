@@ -212,6 +212,7 @@ export interface ChatRoom {
   title: string;
   creatorName: string;
   creatorId: string; // 소멸 권한 확인을 위한 추가
+  creatorLevel?: number; // 행성 창설자 레벨 (정렬용)
   participantCount: number;
   createdAt: number;
   isPermanent: boolean;

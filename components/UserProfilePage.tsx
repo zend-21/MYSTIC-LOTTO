@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { UserProfile, OrbState, SavedFortune, ORB_DECORATIONS, CalendarType } from '../types';
+import { UserProfile, OrbState, SavedFortune, FortuneResult, AnnualDestiny, ScientificAnalysisResult, ORB_DECORATIONS, CalendarType } from '../types';
 import KoreanLunarCalendar from 'korean-lunar-calendar';
 import { OrbVisual } from './FortuneOrb';
 import ModelStatusCard from './admin/ModelStatusCard';
@@ -28,6 +28,7 @@ interface UserProfilePageProps {
   isAdmin?: boolean;
   subAdminConfig?: Record<string, number>;
   onSubAdminConfigChange?: (cfg: Record<string, number>) => void;
+  onDeleteArchive: (id: string) => void;
 }
 
 interface CitySuggestion {
@@ -36,8 +37,11 @@ interface CitySuggestion {
   lon: number;
 }
 
-const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archives, onUpdateProfile, onUpdateOrb, onWithdraw, onBack, onToast, isAdmin, subAdminConfig = {}, onSubAdminConfigChange = () => {} }) => {
-  const [activeTab, setActiveTab] = useState<'identity' | 'treasury' | 'social' | 'sanctum' | 'admin'>('identity');
+const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archives, onUpdateProfile, onUpdateOrb, onWithdraw, onBack, onToast, isAdmin, subAdminConfig = {}, onSubAdminConfigChange = () => {}, onDeleteArchive }) => {
+  const [activeTab, setActiveTab] = useState<'identity' | 'treasury' | 'archives' | 'social' | 'sanctum' | 'admin'>('identity');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [archiveCategory, setArchiveCategory] = useState<'all' | 'divine' | 'annual' | 'scientific'>('all');
+  const [selectedArchive, setSelectedArchive] = useState<SavedFortune | null>(null);
   const [chatCaptures, setChatCaptures] = useState<ChatCapture[]>([]);
   const [expandedCapture, setExpandedCapture] = useState<string | null>(null);
 
@@ -239,40 +243,53 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
       </header>
 
       <div className="flex-1 overflow-hidden flex">
-        <aside className="w-20 md:w-64 border-r border-white/5 glass flex flex-col py-10 space-y-2 shrink-0">
+        <aside className={`${sidebarOpen ? 'w-52' : 'w-14'} transition-all duration-300 border-r border-white/5 glass flex flex-col pt-4 pb-6 space-y-1 shrink-0`}>
+           {/* 토글 버튼 */}
+           <button onClick={() => setSidebarOpen(!sidebarOpen)} className="self-end mr-3 mb-3 w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-500 hover:text-white transition-all shrink-0">
+             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+               {sidebarOpen ? <path d="M15 18l-6-6 6-6"/> : <path d="M9 18l6-6-6-6"/>}
+             </svg>
+           </button>
+
            {[
              { id: 'identity', label: 'Identity', sub: '정체성 및 기록', icon: '🆔' },
-             { id: 'treasury', label: 'Treasury', sub: '인벤토리 및 서고', icon: '💎' },
+             { id: 'treasury', label: 'Inventory', sub: '개인 인벤토리', icon: '💎' },
+             { id: 'archives', label: 'Archives', sub: '리포트 서고', icon: '📄' },
              { id: 'social', label: 'Social', sub: '선물 및 편지함', icon: '📧' },
              { id: 'sanctum', label: 'Sanctum', sub: '개인 성소 꾸미기', icon: '🏛️' },
            ].map(tab => (
-             <button 
+             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`w-full px-4 md:px-8 py-4 flex items-center space-x-4 transition-all group ${activeTab === tab.id ? 'bg-indigo-600/10 border-r-2 border-indigo-500' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
+              className={`w-full py-4 flex items-center transition-all group ${sidebarOpen ? 'px-6 space-x-4' : 'justify-center'} ${activeTab === tab.id ? 'bg-indigo-600/10 border-r-2 border-indigo-500' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
              >
-               <span className="text-xl">{tab.icon}</span>
-               <div className="hidden md:flex flex-col text-left">
-                  <span className={`text-[11px] font-black uppercase tracking-widest ${activeTab === tab.id ? 'text-indigo-400' : 'text-slate-400'}`}>{tab.label}</span>
-                  <span className="text-[9px] text-slate-600 font-bold">{tab.sub}</span>
-               </div>
+               <span className="text-xl shrink-0">{tab.icon}</span>
+               {sidebarOpen && (
+                 <div className="flex flex-col text-left overflow-hidden">
+                   <span className={`text-[11px] font-black uppercase tracking-widest truncate ${activeTab === tab.id ? 'text-indigo-400' : 'text-slate-400'}`}>{tab.label}</span>
+                   <span className="text-[9px] text-slate-600 font-bold truncate">{tab.sub}</span>
+                 </div>
+               )}
              </button>
            ))}
            {isAdmin && (
              <button
                onClick={() => setActiveTab('admin')}
-               className={`w-full px-4 md:px-8 py-4 flex items-center space-x-4 transition-all ${activeTab === 'admin' ? 'bg-amber-500/10 border-r-2 border-amber-400' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
+               className={`w-full py-4 flex items-center transition-all ${sidebarOpen ? 'px-6 space-x-4' : 'justify-center'} ${activeTab === 'admin' ? 'bg-amber-500/10 border-r-2 border-amber-400' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
              >
-               <span className="text-xl">👑</span>
-               <div className="hidden md:flex flex-col text-left">
-                 <span className={`text-[11px] font-black uppercase tracking-widest ${activeTab === 'admin' ? 'text-amber-400' : 'text-slate-400'}`}>Admin</span>
-                 <span className="text-[9px] text-slate-600 font-bold">최고관리자 구역</span>
-               </div>
+               <span className="text-xl shrink-0">👑</span>
+               {sidebarOpen && (
+                 <div className="flex flex-col text-left overflow-hidden">
+                   <span className={`text-[11px] font-black uppercase tracking-widest truncate ${activeTab === 'admin' ? 'text-amber-400' : 'text-slate-400'}`}>Admin</span>
+                   <span className="text-[9px] text-slate-600 font-bold truncate">최고관리자 구역</span>
+                 </div>
+               )}
              </button>
            )}
            <div className="flex-1"></div>
-           <button onClick={() => setShowWithdrawConfirm(true)} className="w-full px-8 py-6 text-left opacity-20 hover:opacity-100 hover:bg-rose-900/20 transition-all text-rose-500">
-              <span className="text-[10px] font-black uppercase tracking-widest">Withdrawal</span>
+           <button onClick={() => setShowWithdrawConfirm(true)} className={`w-full py-5 flex items-center opacity-20 hover:opacity-100 hover:bg-rose-900/20 transition-all text-rose-500 ${sidebarOpen ? 'px-6 space-x-3' : 'justify-center'}`}>
+             <span className="text-sm shrink-0">🚪</span>
+             {sidebarOpen && <span className="text-[10px] font-black uppercase tracking-widest">Withdrawal</span>}
            </button>
         </aside>
 
@@ -474,30 +491,21 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
 
               {activeTab === 'treasury' && (
                 <div className="space-y-10 animate-in slide-in-from-right-4 duration-500">
-                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                      <section className="space-y-6">
-                         <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>💎</span><span>개인 인벤토리</span></h4>
-                         <div className="grid grid-cols-2 gap-4">
-                            <div className="glass p-5 rounded-2xl border border-white/5 flex flex-col items-center justify-center space-y-2">
-                               <span className="text-2xl">💳</span>
-                               <p className="text-[9px] font-black text-slate-400 uppercase">Golden Card</p>
-                               <span className={`text-[10px] font-bold ${orb.hasGoldenCard ? 'text-yellow-500' : 'text-slate-700'}`}>{orb.hasGoldenCard ? 'OWNED' : 'NOT OWNED'}</span>
-                            </div>
-                            <div className="glass p-5 rounded-2xl border border-white/5 flex flex-col items-center justify-center space-y-2">
-                               <span className="text-2xl">✨</span>
-                               <p className="text-[9px] font-black text-slate-400 uppercase">Auras</p>
-                               <span className="text-[10px] font-bold text-indigo-400">{orb.purchasedDecorationIds.length} OWNED</span>
-                            </div>
+                   <section className="space-y-6">
+                      <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>💎</span><span>개인 인벤토리</span></h4>
+                      <div className="grid grid-cols-2 gap-4">
+                         <div className="glass p-5 rounded-2xl border border-white/5 flex flex-col items-center justify-center space-y-2">
+                            <span className="text-2xl">💳</span>
+                            <p className="text-[9px] font-black text-slate-400 uppercase">Golden Card</p>
+                            <span className={`text-[10px] font-bold ${orb.hasGoldenCard ? 'text-yellow-500' : 'text-slate-700'}`}>{orb.hasGoldenCard ? 'OWNED' : 'NOT OWNED'}</span>
                          </div>
-                      </section>
-                      <section className="space-y-6">
-                         <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>📜</span><span>운명 기록 (서고)</span></h4>
-                         <div className="glass p-8 rounded-[2.5rem] border border-white/5 flex flex-col items-center justify-center space-y-2 h-full min-h-[160px]">
-                            <p className="text-3xl font-mystic font-black text-white">{archives.length}</p>
-                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Total Revelations</p>
+                         <div className="glass p-5 rounded-2xl border border-white/5 flex flex-col items-center justify-center space-y-2">
+                            <span className="text-2xl">✨</span>
+                            <p className="text-[9px] font-black text-slate-400 uppercase">Auras</p>
+                            <span className="text-[10px] font-bold text-indigo-400">{orb.purchasedDecorationIds.length} OWNED</span>
                          </div>
-                      </section>
-                   </div>
+                      </div>
+                   </section>
                    <section className="space-y-6">
                       <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>💰</span><span>구매 내역 (History)</span></h4>
                       <div className="glass rounded-[2rem] border border-white/5 overflow-hidden">
@@ -527,6 +535,61 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                    </section>
                 </div>
               )}
+
+              {activeTab === 'archives' && (() => {
+                const filtered = archiveCategory === 'all' ? archives : archives.filter(a => a.type === archiveCategory);
+                const typeLabel: Record<string, string> = { divine: '🔮 천기누설', annual: '⭐ 천명수', scientific: '🔬 지성분석' };
+                const typeBg: Record<string, string> = { divine: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30', annual: 'bg-amber-500/20 text-amber-300 border-amber-500/30', scientific: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' };
+                const getMiniNums = (a: SavedFortune): number[] => {
+                  const d = a.data as any;
+                  return (d.luckyNumbers || d.numbers || []).slice(0, 3);
+                };
+                const getCoreNums = (a: SavedFortune): number[] => {
+                  const d = a.data as any;
+                  return d.coreNumbers || [];
+                };
+                return (
+                  <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
+                    {/* 카테고리 필터 */}
+                    <div className="flex flex-wrap gap-2">
+                      {(['all', 'divine', 'annual', 'scientific'] as const).map(cat => (
+                        <button key={cat} onClick={() => setArchiveCategory(cat)}
+                          className={`px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all border ${archiveCategory === cat ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-white/5 text-slate-500 border-white/10 hover:text-slate-300'}`}>
+                          {cat === 'all' ? '전체' : typeLabel[cat]}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* 기록 목록 */}
+                    {filtered.length === 0 ? (
+                      <div className="text-center py-20 text-slate-600 text-xs font-black uppercase tracking-widest">기록 없음</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {filtered.map(item => {
+                          const miniNums = getMiniNums(item);
+                          const coreNums = getCoreNums(item);
+                          const dt = new Date(item.timestamp);
+                          const dateStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+                          return (
+                            <div key={item.id} onClick={() => setSelectedArchive(item)}
+                              className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-white/5 border border-white/5 hover:bg-white/10 transition-all cursor-pointer group">
+                              <span className={`text-[10px] font-black px-2 py-1 rounded-lg border shrink-0 ${typeBg[item.type]}`}>{typeLabel[item.type]}</span>
+                              <span className="text-[11px] text-slate-500 font-bold shrink-0">{dateStr}</span>
+                              <div className="flex gap-1 flex-1">
+                                {miniNums.map((n, i) => (
+                                  <div key={i} className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black shadow ${coreNums.includes(n) ? 'bg-gradient-to-br from-amber-300 to-amber-600 text-slate-950' : 'bg-slate-700 text-white'}`}>{n}</div>
+                                ))}
+                              </div>
+                              <button onClick={e => { e.stopPropagation(); onDeleteArchive(item.id); }}
+                                className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-rose-400 transition-all text-lg shrink-0">🗑️</button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {activeTab === 'social' && (
                 <div className="space-y-10 animate-in slide-in-from-right-4 duration-500">
@@ -690,6 +753,119 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
            </div>
         </main>
       </div>
+
+      {selectedArchive && (() => {
+        const d = selectedArchive.data as any;
+        const dt = new Date(selectedArchive.timestamp);
+        const dateStr = `${dt.getFullYear()}년 ${dt.getMonth()+1}월 ${dt.getDate()}일 ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+        const typeLabel: Record<string, string> = { divine: '🔮 천기누설', annual: '⭐ 천명수', scientific: '🔬 지성분석' };
+        const allNums: number[] = d.luckyNumbers || d.numbers || [];
+        const coreNums: number[] = d.coreNumbers || [];
+        return (
+          <div className="fixed inset-0 z-[6000] flex items-start justify-center p-4 bg-black/90 backdrop-blur-xl overflow-y-auto">
+            <div className="relative w-full max-w-lg my-8 glass rounded-[2.5rem] border border-white/10 p-8 space-y-8 animate-in zoom-in-95 duration-300">
+              <button onClick={() => setSelectedArchive(null)} className="absolute top-6 right-6 text-slate-500 hover:text-white text-2xl transition-colors">✕</button>
+
+              {/* 헤더 */}
+              <div className="space-y-1">
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{dateStr}</p>
+                <h3 className="text-xl font-mystic font-black text-white">{typeLabel[selectedArchive.type]}</h3>
+              </div>
+
+              {/* 번호 공 */}
+              {allNums.length > 0 && (
+                <div className="space-y-3">
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">행운의 번호</p>
+                  <div className="flex flex-wrap gap-3">
+                    {allNums.map((n: number, i: number) => (
+                      <div key={i} className={`w-12 h-12 rounded-full flex items-center justify-center font-black text-base shadow-xl ${coreNums.includes(n) ? 'bg-gradient-to-br from-amber-300 to-amber-600 text-slate-950 ring-2 ring-amber-400 ring-offset-2 ring-offset-[#020617]' : 'bg-slate-800 text-white border border-white/10'}`}>{n}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 천기누설 */}
+              {selectedArchive.type === 'divine' && (
+                <div className="space-y-4">
+                  {[
+                    { label: '🌟 종합운', val: d.overallFortune },
+                    { label: '💰 재물운', val: d.wealthFortune },
+                    { label: '❤️ 애정운', val: d.loveFortune },
+                    { label: '🌿 건강운', val: d.healthFortune },
+                    { label: '☯️ 사주 심층', val: d.sajuDeepDive },
+                    { label: '🃏 타로 심층', val: d.tarotDeepDive },
+                    { label: '🪐 점성술 심층', val: d.astrologyDeepDive },
+                    { label: '📜 핵심 전언', val: d.recommendationReason },
+                  ].filter(s => s.val).map(s => (
+                    <div key={s.label} className="p-5 bg-white/5 rounded-2xl border border-white/5 space-y-2">
+                      <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{s.label}</p>
+                      <p className="text-sm text-slate-300 leading-relaxed">{s.val}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 천명수 */}
+              {selectedArchive.type === 'annual' && (
+                <div className="space-y-4">
+                  <div className="p-5 bg-amber-500/5 rounded-2xl border border-amber-500/20 text-center">
+                    <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1">{d.year}년 천명수</p>
+                    {d.luckyColor && <p className="text-xs text-slate-400">행운의 색: <span className="font-black text-white">{d.luckyColor}</span></p>}
+                  </div>
+                  {[
+                    { label: '📖 대운 종합', val: d.reason },
+                    { label: '💰 재물운 상세', val: d.wealthDetailed },
+                    { label: '❤️ 애정운 상세', val: d.loveDetailed },
+                    { label: '🌿 건강운 상세', val: d.healthDetailed },
+                    { label: '🃏 타로 상세', val: d.tarotDetailed },
+                    { label: '🪐 점성술 상세', val: d.astrologyDetailed },
+                    { label: '☯️ 사주 심층', val: d.sajuDeepDive },
+                    { label: '📅 계획 전략', val: d.planningStrategy },
+                    { label: '🟢 최고의 달', val: d.bestMonths },
+                    { label: '🔴 주의의 달', val: d.worstMonths },
+                  ].filter(s => s.val).map(s => (
+                    <div key={s.label} className="p-5 bg-white/5 rounded-2xl border border-white/5 space-y-2">
+                      <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest">{s.label}</p>
+                      <p className="text-sm text-slate-300 leading-relaxed">{s.val}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 지성분석 */}
+              {selectedArchive.type === 'scientific' && (
+                <div className="space-y-4">
+                  {d.scientificReport && (
+                    <div className="p-5 bg-cyan-500/5 rounded-2xl border border-cyan-500/20 space-y-2">
+                      <p className="text-[10px] font-black text-cyan-400 uppercase tracking-widest">🔬 과학적 분석</p>
+                      <p className="text-sm text-slate-300 leading-relaxed">{d.scientificReport}</p>
+                    </div>
+                  )}
+                  {d.metrics && (
+                    <div className="p-5 bg-white/5 rounded-2xl border border-white/5 space-y-2">
+                      <p className="text-[10px] font-black text-cyan-400 uppercase tracking-widest">📊 주요 메트릭</p>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <span className="text-slate-500">합계</span><span className="text-white font-bold">{d.metrics.sum}</span>
+                        <span className="text-slate-500">홀짝</span><span className="text-white font-bold">{d.metrics.oddEven}</span>
+                        <span className="text-slate-500">고저</span><span className="text-white font-bold">{d.metrics.highLow}</span>
+                        <span className="text-slate-500">연속수</span><span className="text-white font-bold">{d.metrics.consecutiveCount}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 삭제 / 닫기 */}
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => { onDeleteArchive(selectedArchive.id); setSelectedArchive(null); }}
+                  className="flex-1 py-4 bg-rose-500/10 text-rose-400 border border-rose-500/20 font-black rounded-2xl text-xs uppercase tracking-widest hover:bg-rose-500/20 transition-all">삭제</button>
+                <button onClick={() => setSelectedArchive(null)}
+                  className="flex-1 py-4 bg-white/5 text-slate-400 font-black rounded-2xl text-xs uppercase tracking-widest hover:bg-white/10 transition-all">닫기</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {showWithdrawConfirm && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center px-6">

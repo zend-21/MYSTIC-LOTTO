@@ -570,7 +570,7 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
            <span className="w-2.5 h-2.5 bg-cyan-400 rounded-full animate-pulse shadow-[0_0_10px_#22d3ee]"></span>
            <span className="text-[10px] font-black text-cyan-400 tracking-[0.5em] uppercase">Mystic Lotto Intellect Lab v6.0</span>
         </div>
-        <h2 className="text-5xl md:text-6xl font-mystic font-black text-white tracking-widest uppercase text-center drop-shadow-2xl">지성 분석 연구실</h2>
+        <h2 className="text-3xl md:text-4xl font-mystic font-black text-white tracking-widest uppercase text-center drop-shadow-2xl">지성 분석 연구실</h2>
         <div className="flex space-x-6">
            <button onClick={() => setShowDocs(true)} className="flex items-center space-x-2 text-[10px] font-black text-cyan-500/80 hover:text-cyan-400 transition-colors uppercase tracking-[0.3em] group">
              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>

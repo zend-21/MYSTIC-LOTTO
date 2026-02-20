@@ -17,7 +17,6 @@ import LottoGenerator from './components/LottoGenerator';
 import GoldenCard from './components/GoldenCard';
 import SacredOffering from './components/SacredOffering';
 import DivineEffect from './components/DivineEffect';
-import Archives from './components/Archives';
 import EternalRitual from './components/EternalRitual';
 import ScientificAnalysis from './components/ScientificAnalysis';
 import CelestialSquare from './components/CelestialSquare';
@@ -44,7 +43,7 @@ const App: React.FC = () => {
   const [result, setResult] = useState<FortuneResult | null>(null);
   const [scienceResult, setScientificResult] = useState<ScientificAnalysisResult | null>(null);
   const [showShop, setShowShop] = useState(false);
-  const [activeTab, setActiveTab] = useState<'orb' | 'treasury' | 'offering' | 'archives' | 'science'>('orb');
+  const [activeTab, setActiveTab] = useState<'orb' | 'treasury' | 'offering' | 'science'>('orb');
   const [view, setView] = useState<'main' | 'square' | 'profile' | 'analysis'>('main');
   const [showMenu, setShowMenu] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -70,6 +69,7 @@ const App: React.FC = () => {
 
   const [archives, setArchives] = useState<SavedFortune[]>([]);
   const [offeringData, setOfferingData] = useState<{amount: number, multiplier: number} | null>(null);
+  const [lumenReceivedAt, setLumenReceivedAt] = useState(0);
 
   const [orb, setOrb] = useState<OrbState>({
     level: 1,
@@ -207,7 +207,10 @@ const App: React.FC = () => {
             batch.update(userDocRef, { 'orb.points': increment(totalGift) });
           }
           await batch.commit().catch(() => {});
-          if (totalGift > 0) setToast(`${totalGift.toLocaleString()} 루멘을 선물받았습니다! ✨`);
+          if (totalGift > 0) {
+            setToast(`${totalGift.toLocaleString()} 루멘을 선물받았습니다! ✨`);
+            setLumenReceivedAt(Date.now());
+          }
           if (totalExp > 0) {
             // exp는 클라이언트 growOrb로 처리 (레벨 계산 포함)
             setOrb((prev: OrbState) => {
@@ -374,10 +377,6 @@ const App: React.FC = () => {
   const updatePoints = (amount: number) => setOrb({ ...orb, points: orb.points + amount });
   const updateFavorites = (roomIds: string[]) => setOrb({ ...orb, favoriteRoomIds: roomIds });
 
-  const getDivineMessage = () => {
-    const messages = ["오늘의 기운이 당신을 향해 굽이칩니다.", "우주의 파동이 당신의 탄생 기운과 공명합니다.", "행운의 별이 당신의 머리 위에서 빛나고 있습니다.", "찰나의 인연이 거대한 운명의 흐름을 바꿉니다.", "당신의 수련이 결실을 맺을 때가 다가옵니다."];
-    return messages[Math.floor(Math.random() * messages.length)];
-  };
 
   const addPoints = async (amount: number) => {
     if (!currentUser) return;
@@ -628,7 +627,7 @@ const App: React.FC = () => {
 
 
   return (
-    <div className="min-h-screen bg-[#020617] pb-48 text-slate-200 overflow-x-hidden">
+    <div className="h-screen flex flex-col bg-[#020617] text-slate-200 overflow-x-hidden">
       {/* 프리미엄 연간 리포트 모달 */}
       {showFullAnnualReport && currentDestiny && (
         <AnnualReportModal
@@ -668,8 +667,8 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {view === 'square' && <CelestialSquare profile={profile} orb={orb} onUpdatePoints={updatePoints} onUpdateFavorites={updateFavorites} onBack={() => setView('main')} onToast={onToast} onGrowFromPost={handlePostCreated} isAdmin={isAdmin} />}
-      {view === 'profile' && <UserProfilePage profile={profile} orb={orb} archives={archives} onUpdateProfile={onUpdateProfile} onUpdateOrb={onUpdateOrb} onWithdraw={handleWithdrawAction} onBack={() => setView('main')} onToast={onToast} isAdmin={isAdmin} subAdminConfig={subAdminConfig} onSubAdminConfigChange={setSubAdminConfig} />}
+      {view === 'square' && <CelestialSquare profile={profile} orb={orb} onUpdatePoints={updatePoints} onUpdateFavorites={updateFavorites} onBack={() => setView('main')} onToast={onToast} onGrowFromPost={handlePostCreated} isAdmin={isAdmin} lumenReceivedAt={lumenReceivedAt} />}
+      {view === 'profile' && <UserProfilePage profile={profile} orb={orb} archives={archives} onUpdateProfile={onUpdateProfile} onUpdateOrb={onUpdateOrb} onWithdraw={handleWithdrawAction} onBack={() => setView('main')} onToast={onToast} isAdmin={isAdmin} subAdminConfig={subAdminConfig} onSubAdminConfigChange={setSubAdminConfig} onDeleteArchive={deleteArchive} />}
       {view === 'analysis' && <MysticAnalysisLab lottoHistory={lottoHistory} onBack={() => setView('main')} />}
       {offeringData && <DivineEffect amount={offeringData.amount} multiplier={offeringData.multiplier} onComplete={handleOfferingComplete} />}
       {toast && (<div className="fixed inset-0 flex items-center justify-center z-[6000] pointer-events-none px-6"><div className="bg-slate-900/40 backdrop-blur-3xl text-white px-12 py-7 rounded-[2.5rem] shadow-[0_40px_100px_rgba(0,0,0,0.8)] border border-white/10 text-center animate-in zoom-in-95 duration-500 max-w-md"><p className="text-xl font-bold leading-tight whitespace-pre-line">{toast}</p></div></div>)}
@@ -702,12 +701,12 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <header className="sticky top-0 z-[100] border-b border-white/5 px-8 py-4 flex justify-between items-center">
-        <div className="absolute inset-0 bg-white/[0.02] backdrop-blur-xl -z-10 pointer-events-none" />
+      {view === 'main' && (<>
+      <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+      <div className="border-b border-white/5 px-8 py-4 flex justify-between items-center">
         <div className="flex items-center space-x-4">
           <img src="/s_mlotto_logo.png" alt="Mystic" className="w-10 h-10 object-contain drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
           <div className="flex flex-col"><h2 className="text-2xl font-mystic font-black text-white tracking-widest leading-none">MYSTIC</h2><span className="text-[8px] text-indigo-400 uppercase font-bold tracking-[0.5em] mt-1">Lotto Resonance</span></div>
-          <div className="hidden md:flex flex-col ml-6"><p className="text-[10px] text-indigo-100 font-bold italic animate-pulse">"{getDivineMessage()}"</p></div>
         </div>
         <div className="flex items-center space-x-6 text-right relative">
           <button onClick={() => setView('profile')} className="hover:bg-white/5 p-2 rounded-xl group flex items-center space-x-4">
@@ -735,16 +734,15 @@ const App: React.FC = () => {
             )}
           </div>
         </div>
-      </header>
+      </div>
 
-      <main className="max-w-6xl mx-auto px-8 py-16 space-y-24">
+      <div className="px-8 py-16 space-y-24">
         <div className="flex justify-center mb-10 overflow-x-auto pb-4 no-scrollbar">
           <div className="bg-slate-950/50 border border-white/5 rounded-2xl p-1.5 flex space-x-2 shrink-0">
              <button onClick={() => setActiveTab('orb')} className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'orb' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>운세 & 구슬</button>
              <button onClick={() => setActiveTab('science')} className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'science' ? 'bg-cyan-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>지성 분석</button>
              <button onClick={() => setActiveTab('treasury')} className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'treasury' ? 'bg-yellow-600 text-slate-950 shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>보관소</button>
              <button onClick={() => setActiveTab('offering')} className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'offering' ? 'bg-rose-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>봉헌</button>
-             <button onClick={() => setActiveTab('archives')} className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'archives' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>서고</button>
           </div>
         </div>
         
@@ -802,10 +800,10 @@ const App: React.FC = () => {
           </section>
         )}
         {activeTab === 'offering' && <section className="flex flex-col items-center animate-in fade-in duration-700"><SacredOffering onOffer={handleOfferAmount} /></section>}
-        {activeTab === 'archives' && <section className="animate-in fade-in duration-700"><Archives items={archives} orb={orb} onDelete={deleteArchive} /></section>}
+      </div>
       </main>
 
-      <footer className="fixed bottom-0 left-0 right-0 border-t border-white/10 px-10 py-8 flex items-center justify-between z-[200] shadow-2xl">
+      <footer className="relative shrink-0 border-t border-white/10 px-10 py-8 flex items-center justify-between z-[200] shadow-2xl">
         <div className="absolute inset-0 bg-white/[0.02] backdrop-blur-3xl -z-10 pointer-events-none" />
          <div className="flex items-center space-x-8">
             <div className="relative">
@@ -825,6 +823,7 @@ const App: React.FC = () => {
             <p className="text-3xl font-mystic font-black text-yellow-500 tabular-nums">{displayPoints(orb.points)} <span className="text-sm font-sans">L</span></p>
          </div>
       </footer>
+      </>)}
 
       <style>{`
         .drop-shadow-glow { filter: drop-shadow(0 0 20px rgba(251, 191, 36, 0.4)); }

@@ -149,7 +149,7 @@ const FortuneOrb: React.FC<FortuneOrbProps> = ({ orb, onGrow }) => {
   );
 
   return (
-    <div className="flex flex-col items-center justify-center p-8 space-y-10 relative">
+    <div className="flex flex-col items-center justify-center p-8 space-y-6 relative">
       {/* 대형 구슬 프리뷰 모달 */}
       {previewLevel !== null && (
         <div 
@@ -235,7 +235,7 @@ const FortuneOrb: React.FC<FortuneOrbProps> = ({ orb, onGrow }) => {
         </div>
       )}
 
-      <div className="relative group cursor-pointer" onClick={onGrow}>
+      <div className="relative group cursor-pointer mb-[15px]" onClick={onGrow}>
         <div className={`absolute inset-0 rounded-full scale-125 opacity-30 ${activeDecoration.effectClass}`} style={{ backgroundColor: orb.color }}></div>
         <div className="relative transform group-hover:scale-105 transition-transform duration-1000 animate-pulse-gold">
           <OrbVisual level={orb.level} className="w-56 h-56" />
@@ -256,41 +256,25 @@ const FortuneOrb: React.FC<FortuneOrbProps> = ({ orb, onGrow }) => {
         )}
       </div>
 
-      <div className="w-full max-w-xs space-y-10 text-center">
+      <div className="w-full max-w-xs space-y-2 text-center">
         <div className="flex justify-between items-end">
           <h3 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 to-purple-400 font-mystic">Fortune Orb</h3>
           <span className="text-xs text-slate-500 font-bold">Lvl {orb.level}</span>
         </div>
         <div className="bg-slate-900 h-4 w-full rounded-full overflow-hidden border border-slate-700/50 p-[2px] shadow-inner">
-          <div 
+          <div
             className={`h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-full transition-all duration-1000 ease-out`}
             style={{ width: `${(orb.exp % 100)}%` }}
           ></div>
         </div>
-        <div className="flex justify-between items-center mt-1">
+        <div className="flex justify-between items-center">
           <p className="text-[10px] text-slate-500 tracking-widest uppercase font-black">Energy resonance: {orb.exp % 100}%</p>
           <button onClick={() => setShowDocs(true)} className="text-[9px] font-black text-indigo-400 hover:text-indigo-300 transition-colors uppercase tracking-widest border-b border-indigo-400/30">구슬의 진화란?</button>
         </div>
       </div>
 
       <div className="flex flex-col items-center space-y-3">
-        {/* 일일 탭 게이지 (10칸) */}
-        <div className="flex flex-col items-center space-y-1.5">
-          <div className="flex items-center space-x-1.5">
-            {Array.from({ length: 10 }).map((_, i) => {
-              const usedTaps = Math.min(10, Math.floor((orb.dailyOrbTapExp ?? 0) / 5));
-              return (
-                <div
-                  key={i}
-                  className={`w-4 h-1.5 rounded-full transition-all duration-300 ${i < usedTaps ? 'bg-indigo-400' : 'bg-white/10'}`}
-                />
-              );
-            })}
-          </div>
-          <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest">
-            Daily Training {Math.min(10, Math.floor((orb.dailyOrbTapExp ?? 0) / 5))}/10
-          </p>
-        </div>
+
         <button
           onClick={onGrow}
           className={`px-10 py-4 rounded-2xl font-black backdrop-blur-md transition-all active:scale-95 shadow-2xl border ${isUniversalCrystal ? 'bg-indigo-600/20 border-indigo-400/50 text-white' : 'bg-white/5 border-white/10 text-white hover:bg-white/10'}`}
@@ -298,6 +282,7 @@ const FortuneOrb: React.FC<FortuneOrbProps> = ({ orb, onGrow }) => {
           기운 정화하기 (+5 EXP)
         </button>
         <p className="text-xs text-slate-600 italic font-medium">화면을 탭하여 구슬을 정화하십시오</p>
+
       </div>
 
       <style>{`

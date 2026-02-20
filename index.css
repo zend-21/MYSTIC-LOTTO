@@ -10,6 +10,20 @@ body {
   overflow-x: hidden;
 }
 
+/* PC에서 앱을 640px 폰 사이즈로 중앙 정렬 */
+@media (min-width: 641px) {
+  #root {
+    max-width: 640px;
+    margin: 0 auto;
+    /* height를 정확히 100vh로 고정 — min-height는 fixed 자식이 #root 기준으로 잡힐 때 뷰포트보다 커지는 문제 발생 */
+    height: 100vh;
+    overflow: hidden;
+    /* fixed 자식 요소들을 이 컨테이너 기준으로 고정 (CelestialSquare 등) */
+    transform: translateZ(0);
+    box-shadow: 0 0 80px rgba(99, 102, 241, 0.08), 0 0 0 1px rgba(255,255,255,0.04);
+  }
+}
+
 ::-webkit-scrollbar {
   width: 8px;
 }
