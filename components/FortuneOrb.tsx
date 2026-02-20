@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { OrbState, ORB_DECORATIONS } from '../types';
 
 interface FortuneOrbProps {
@@ -29,10 +29,8 @@ export const OrbVisual: React.FC<{ level: number; isLarge?: boolean; className?:
         background: `rgba(0, 0, 0, ${opacity})`,
         border: '1.5px solid rgba(255, 255, 255, 0.25)',
         boxShadow: `
-          inset 0 20px 50px rgba(255, 255, 255, 0.08),
-          inset 0 -20px 40px rgba(0, 0, 0, 1),
-          0 0 ${90 * scale}px rgba(99, 102, 241, 0.12),
-          0 0 ${40 * scale}px rgba(255, 255, 255, 0.02)
+          0 0 ${30 * scale}px ${5 * scale}px rgba(148, 163, 184, 0.3),
+          inset 0 0 ${10 * scale}px rgba(255, 255, 255, 0.05)
         `,
       };
     }
@@ -71,6 +69,18 @@ export const OrbVisual: React.FC<{ level: number; isLarge?: boolean; className?:
 
   const starCount = level >= 100 ? (isLarge ? 150 : 80) : (isLarge ? 40 : 15);
 
+  const starData = useMemo(() =>
+    [...Array(starCount)].map((_, i) => ({
+      width: level >= 100 ? `${Math.random() * 1.5 + 0.5}px` : '1.5px',
+      height: level >= 100 ? `${Math.random() * 1.5 + 0.5}px` : '1.5px',
+      backgroundColor: level >= 100 && i % 8 === 0 ? '#cbd5e1' : 'white',
+      left: `${Math.random() * 100}%`,
+      top: `${Math.random() * 100}%`,
+      animationDelay: `${i * 0.05}s`,
+      animationDuration: `${12 + Math.random() * 18}s`,
+    })),
+  [level, starCount]);
+
   return (
     <div className={`rounded-full relative overflow-hidden flex items-center justify-center transition-all duration-1000 ${className}`} style={getStyle()}>
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden rounded-full">
@@ -99,16 +109,8 @@ export const OrbVisual: React.FC<{ level: number; isLarge?: boolean; className?:
         {level >= 80 && level < 100 && (
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(251,191,36,0.3),transparent)] animate-pulse"></div>
         )}
-        {level >= 50 && [...Array(starCount)].map((_, i) => (
-          <div key={i} className={`absolute rounded-full opacity-0 animate-star-drift`} style={{
-            width: level >= 100 ? `${Math.random() * 1.5 + 0.5}px` : '1.5px',
-            height: level >= 100 ? `${Math.random() * 1.5 + 0.5}px` : '1.5px',
-            backgroundColor: level >= 100 && i % 8 === 0 ? '#cbd5e1' : 'white',
-            left: `${Math.random() * 100}%`,
-            top: `${Math.random() * 100}%`,
-            animationDelay: `${i * 0.05}s`,
-            animationDuration: `${12 + Math.random() * 18}s`
-          }}></div>
+        {level >= 50 && starData.map((s, i) => (
+          <div key={i} className={`absolute rounded-full opacity-0 animate-star-drift`} style={s}></div>
         ))}
         {level >= 100 && (
           <>
@@ -271,12 +273,29 @@ const FortuneOrb: React.FC<FortuneOrbProps> = ({ orb, onGrow }) => {
         </div>
       </div>
 
-      <div className="flex flex-col items-center space-y-2">
-        <button 
+      <div className="flex flex-col items-center space-y-3">
+        {/* 일일 탭 게이지 (10칸) */}
+        <div className="flex flex-col items-center space-y-1.5">
+          <div className="flex items-center space-x-1.5">
+            {Array.from({ length: 10 }).map((_, i) => {
+              const usedTaps = Math.min(10, Math.floor((orb.dailyOrbTapExp ?? 0) / 5));
+              return (
+                <div
+                  key={i}
+                  className={`w-4 h-1.5 rounded-full transition-all duration-300 ${i < usedTaps ? 'bg-indigo-400' : 'bg-white/10'}`}
+                />
+              );
+            })}
+          </div>
+          <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest">
+            Daily Training {Math.min(10, Math.floor((orb.dailyOrbTapExp ?? 0) / 5))}/10
+          </p>
+        </div>
+        <button
           onClick={onGrow}
           className={`px-10 py-4 rounded-2xl font-black backdrop-blur-md transition-all active:scale-95 shadow-2xl border ${isUniversalCrystal ? 'bg-indigo-600/20 border-indigo-400/50 text-white' : 'bg-white/5 border-white/10 text-white hover:bg-white/10'}`}
         >
-          기운 정화하기 (+10 EXP)
+          기운 정화하기 (+5 EXP)
         </button>
         <p className="text-xs text-slate-600 italic font-medium">화면을 탭하여 구슬을 정화하십시오</p>
       </div>

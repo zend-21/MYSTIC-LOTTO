@@ -487,37 +487,50 @@ export const cleanupExpiredRooms = onSchedule(
 );
 
 // ──────────────────────────────────────────────────────────────
-// 모델 가용성 점검 (10일마다 KST 00:00 실행)
-// 각 폴백 체인에서 실제 응답하는 첫 번째 모델로 Firestore 갱신
+// 모델 종료 예고 점검 (10일마다 KST 00:00 실행)
+// 알려진 종료일을 기준으로 30일 이내 경고를 Firestore에 저장
+// ※ 모델 자동 전환 없음 — 최고관리자가 수동 대응
 // ──────────────────────────────────────────────────────────────
-export const checkModelAvailability = onSchedule(
-  { schedule: "0 15 1,11,21 * *", timeZone: "UTC", region: "asia-northeast3", secrets: [GEMINI_API_KEY] },
+export const checkModelDeprecation = onSchedule(
+  { schedule: "0 15 1,11,21 * *", timeZone: "UTC", region: "asia-northeast3" },
   async () => {
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
-    const configRef = db.collection("config").doc("models");
+    // 공식 발표된 종료 예정일 (YYYY-MM-DD) — 새 공지 시 여기만 수정
+    const DEPRECATION_DATES: Record<string, string> = {
+      "gemini-2.0-flash":      "2026-03-31",
+      "gemini-2.5-flash":      "2026-06-17",
+      "gemini-2.5-pro":        "2026-06-17",
+    };
+    const WARN_DAYS = 30;
 
-    // 체인 순서대로 테스트 호출 → 성공한 첫 모델 반환
-    async function findWorkingModel(chain: string[]): Promise<string> {
-      for (const model of chain) {
-        try {
-          await ai.models.generateContent({ model, contents: "ping" });
-          console.log(`checkModelAvailability: ${model} 정상`);
-          return model;
-        } catch (e) {
-          console.warn(`checkModelAvailability: ${model} 응답 없음 → 다음 모델 시도`, e);
-        }
-      }
-      // 체인 전체 실패 시 마지막 모델 유지 (에러 방지)
-      return chain[chain.length - 1];
+    function getDeprecationInfo(modelName: string) {
+      const dateStr = DEPRECATION_DATES[modelName];
+      if (!dateStr) return { deprecationDate: null, daysLeft: null, warning: false };
+      const daysLeft = Math.ceil(
+        (new Date(dateStr).getTime() - Date.now()) / 86_400_000
+      );
+      return {
+        deprecationDate: dateStr,
+        daysLeft: Math.max(0, daysLeft),
+        warning: daysLeft <= WARN_DAYS,
+      };
     }
 
-    const [flash, pro] = await Promise.all([
-      findWorkingModel(FLASH_CHAIN),
-      findWorkingModel(PRO_CHAIN),
-    ]);
+    const flashModel = FLASH_CHAIN[0];
+    const proModel   = PRO_CHAIN[0];
+    const flashInfo  = getDeprecationInfo(flashModel);
+    const proInfo    = getDeprecationInfo(proModel);
 
-    await configRef.set({ flash, pro, checkedAt: Date.now() }, { merge: true });
-    console.log(`checkModelAvailability 완료: flash=${flash}, pro=${pro}`);
+    await db.collection("config").doc("modelStatus").set({
+      flash: { model: flashModel, ...flashInfo },
+      pro:   { model: proModel,   ...proInfo },
+      hasWarning: flashInfo.warning || proInfo.warning,
+      checkedAt:  Date.now(),
+    });
+
+    console.log(
+      `checkModelDeprecation 완료: flash=${flashModel}(${flashInfo.daysLeft ?? "무기한"}일), ` +
+      `pro=${proModel}(${proInfo.daysLeft ?? "무기한"}일)`
+    );
   }
 );
 

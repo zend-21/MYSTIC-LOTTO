@@ -2,6 +2,19 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { UserProfile, OrbState, SavedFortune, ORB_DECORATIONS, CalendarType } from '../types';
 import KoreanLunarCalendar from 'korean-lunar-calendar';
 import { OrbVisual } from './FortuneOrb';
+import ModelStatusCard from './admin/ModelStatusCard';
+import AdminSanctum from './AdminSanctum';
+import { db, auth } from '../services/firebase';
+import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
+
+interface ChatCapture {
+  id: string;
+  savedAt: number;
+  roomName: string;
+  creatorName: string;
+  participants: { uid: string; name: string; uniqueTag: string }[];
+  messages: { userId: string; userName: string; message: string; timestamp: number }[];
+}
 
 interface UserProfilePageProps {
   profile: UserProfile;
@@ -13,6 +26,8 @@ interface UserProfilePageProps {
   onBack: () => void;
   onToast: (m: string) => void;
   isAdmin?: boolean;
+  subAdminConfig?: Record<string, number>;
+  onSubAdminConfigChange?: (cfg: Record<string, number>) => void;
 }
 
 interface CitySuggestion {
@@ -21,9 +36,24 @@ interface CitySuggestion {
   lon: number;
 }
 
-const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archives, onUpdateProfile, onUpdateOrb, onWithdraw, onBack, onToast, isAdmin }) => {
-  const [activeTab, setActiveTab] = useState<'identity' | 'treasury' | 'social' | 'sanctum'>('identity');
-  
+const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archives, onUpdateProfile, onUpdateOrb, onWithdraw, onBack, onToast, isAdmin, subAdminConfig = {}, onSubAdminConfigChange = () => {} }) => {
+  const [activeTab, setActiveTab] = useState<'identity' | 'treasury' | 'social' | 'sanctum' | 'admin'>('identity');
+  const [chatCaptures, setChatCaptures] = useState<ChatCapture[]>([]);
+  const [expandedCapture, setExpandedCapture] = useState<string | null>(null);
+
+  // 갈무리 목록 로드 (Social 탭 진입 시)
+  useEffect(() => {
+    if (activeTab !== 'social' || !auth.currentUser) return;
+    const q = query(
+      collection(db, "users", auth.currentUser.uid, "chatCaptures"),
+      orderBy("savedAt", "desc"),
+      limit(30)
+    );
+    getDocs(q).then(snap => {
+      setChatCaptures(snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatCapture)));
+    }).catch(() => {});
+  }, [activeTab]);
+
   // 닉네임 수정 상태 (상시 노출)
   const [editNickname, setEditNickname] = useState(orb.nickname || '');
   const [isNickValid, setIsNickValid] = useState<boolean | null>(null);
@@ -188,7 +218,8 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
 
   return (
     <div className="fixed inset-0 z-[5000] bg-[#020617] text-slate-200 flex flex-col animate-in fade-in duration-700">
-      <header className="relative z-10 glass border-b border-white/5 px-8 py-6 flex justify-between items-center backdrop-blur-3xl shrink-0">
+      <header className="relative z-10 border-b border-white/5 px-8 py-6 flex justify-between items-center shrink-0">
+        <div className="absolute inset-0 bg-white/[0.02] backdrop-blur-3xl -z-10 pointer-events-none" />
         <div className="flex items-center space-x-6">
           <button onClick={onBack} className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
@@ -227,6 +258,18 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                </div>
              </button>
            ))}
+           {isAdmin && (
+             <button
+               onClick={() => setActiveTab('admin')}
+               className={`w-full px-4 md:px-8 py-4 flex items-center space-x-4 transition-all ${activeTab === 'admin' ? 'bg-amber-500/10 border-r-2 border-amber-400' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
+             >
+               <span className="text-xl">👑</span>
+               <div className="hidden md:flex flex-col text-left">
+                 <span className={`text-[11px] font-black uppercase tracking-widest ${activeTab === 'admin' ? 'text-amber-400' : 'text-slate-400'}`}>Admin</span>
+                 <span className="text-[9px] text-slate-600 font-bold">최고관리자 구역</span>
+               </div>
+             </button>
+           )}
            <div className="flex-1"></div>
            <button onClick={() => setShowWithdrawConfirm(true)} className="w-full px-8 py-6 text-left opacity-20 hover:opacity-100 hover:bg-rose-900/20 transition-all text-rose-500">
               <span className="text-[10px] font-black uppercase tracking-widest">Withdrawal</span>
@@ -238,6 +281,7 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
               
               {activeTab === 'identity' && (
                 <div className="space-y-10 animate-in slide-in-from-right-4 duration-500">
+                   {isAdmin && <ModelStatusCard />}
                    <div className="space-y-2">
                      <h3 className="text-2xl font-black text-white">Divine Identity</h3>
                      <p className="text-xs text-slate-500 italic">"앱 내 활동용 칭호와 당신의 운명 정보를 정의하십시오."</p>
@@ -534,6 +578,61 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                          )}
                       </div>
                    </section>
+
+                   <section className="space-y-6">
+                      <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>🗂️</span><span>대화방 갈무리</span></h4>
+                      {chatCaptures.length > 0 ? (
+                        <div className="space-y-3">
+                          {chatCaptures.map(cap => (
+                            <div key={cap.id} className="glass rounded-[2rem] border border-white/5 overflow-hidden">
+                              <button
+                                className="w-full p-5 flex justify-between items-center hover:bg-white/5 transition-all text-left"
+                                onClick={() => setExpandedCapture(expandedCapture === cap.id ? null : cap.id)}
+                              >
+                                <div>
+                                  <p className="text-sm font-black text-white">{cap.roomName}</p>
+                                  <p className="text-[10px] text-slate-500 font-bold mt-0.5">
+                                    {new Date(cap.savedAt).toLocaleString()} · {cap.participants.length}명 · {cap.messages.length}개 메시지
+                                  </p>
+                                </div>
+                                <span className="text-slate-500 text-sm">{expandedCapture === cap.id ? '▲' : '▼'}</span>
+                              </button>
+                              {expandedCapture === cap.id && (
+                                <div className="border-t border-white/5">
+                                  {/* 참여자 목록 */}
+                                  <div className="px-5 py-3 bg-white/[0.02] border-b border-white/5">
+                                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">참여자</p>
+                                    <div className="flex flex-wrap gap-2">
+                                      {cap.participants.map(p => (
+                                        <span key={p.uid} className="text-[10px] font-bold text-slate-400 bg-white/5 px-2 py-1 rounded-lg">
+                                          {p.name}{p.uniqueTag ? ` @${p.uniqueTag}` : ''}
+                                          {p.uid === cap.participants[0]?.uid ? ' 👑' : ''}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  {/* 메시지 목록 */}
+                                  <div className="max-h-60 overflow-y-auto custom-scroll p-4 space-y-2">
+                                    {cap.messages.map((m, i) => (
+                                      <div key={i} className={`text-xs ${m.userId === 'system' ? 'text-center text-indigo-400/60 italic' : ''}`}>
+                                        {m.userId !== 'system' && (
+                                          <span className="font-black text-slate-500 mr-2">{m.userName}</span>
+                                        )}
+                                        <span className="text-slate-300">{m.message}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="glass p-10 rounded-[2.5rem] border border-dashed border-white/10 text-center">
+                          <p className="text-[10px] text-slate-600 font-black uppercase tracking-widest">저장된 갈무리가 없습니다.</p>
+                        </div>
+                      )}
+                   </section>
                 </div>
               )}
 
@@ -578,6 +677,14 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                       <p className="text-[9px] text-slate-600 mt-1 italic">추후 성소에 가구나 장식품을 루멘으로 구매하여 배치할 수 있는 기능이 업데이트될 예정입니다.</p>
                    </div>
                 </div>
+              )}
+
+              {activeTab === 'admin' && isAdmin && (
+                <AdminSanctum
+                  subAdminConfig={subAdminConfig}
+                  onSubAdminConfigChange={onSubAdminConfigChange}
+                  onToast={onToast}
+                />
               )}
 
            </div>

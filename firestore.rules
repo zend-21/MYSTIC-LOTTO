@@ -25,6 +25,11 @@ service cloud.firestore {
         allow read, write: if isLoggedIn() && request.auth.uid == userId;
       }
 
+      // 대화방 갈무리: 본인만 읽기/쓰기
+      match /chatCaptures/{captureId} {
+        allow read, write: if isLoggedIn() && request.auth.uid == userId;
+      }
+
       // 선물 inbox: 누구나 보낼 수 있고, 본인만 읽기/삭제 가능
       match /inbox/{docId} {
         allow create: if isLoggedIn();

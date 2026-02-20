@@ -30,7 +30,7 @@ import AnnualReportModal from './components/AnnualReportModal';
 // Firebase imports
 import { auth, db, loginWithGoogle, logout } from './services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, deleteDoc, limit as fsLimit, runTransaction, updateDoc, where, getDocs, writeBatch, increment } from "firebase/firestore";
+import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, deleteDoc, limit as fsLimit, runTransaction, updateDoc, where, getDocs, writeBatch, increment, arrayUnion } from "firebase/firestore";
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -66,6 +66,7 @@ const App: React.FC = () => {
   const [lottoHistory, setLottoHistory] = useState<LottoRound[]>([]);
 
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const [showMiningModal, setShowMiningModal] = useState(false);
 
   const [archives, setArchives] = useState<SavedFortune[]>([]);
   const [offeringData, setOfferingData] = useState<{amount: number, multiplier: number} | null>(null);
@@ -190,6 +191,15 @@ const App: React.FC = () => {
               totalExp += (data.amount || 0);
             } else {
               totalGift += (data.amount || 0);
+              batch.update(userDocRef, {
+                "orb.giftHistory": arrayUnion({
+                  id: d.id,
+                  type: 'received',
+                  targetName: data.fromName || '알 수 없음',
+                  amount: data.amount || 0,
+                  timestamp: data.timestamp || Date.now(),
+                })
+              });
             }
             batch.delete(d.ref);
           });
@@ -289,9 +299,9 @@ const App: React.FC = () => {
     }
     if (currentUser) {
       const timer = setTimeout(async () => {
-        // points는 서버(Cloud Functions)가 단독 관리 — 클라이언트 auto-sync에서 제외
-        const { points: _points, ...orbWithoutPoints } = orb;
-        await setDoc(doc(db, "users", currentUser.uid), { profile, orb: orbWithoutPoints }, { merge: true });
+        // points, giftHistory는 서버/arrayUnion으로 관리 — auto-sync에서 제외
+        const { points: _points, giftHistory: _giftHistory, ...orbCore } = orb;
+        await setDoc(doc(db, "users", currentUser.uid), { profile, orb: orbCore }, { merge: true });
       }, 500); // Debounce sync
       return () => clearTimeout(timer);
     }
@@ -562,12 +572,12 @@ const App: React.FC = () => {
     const isNewDay = orb.lastExtractDate !== today;
     const tapExp = isNewDay ? 0 : (orb.dailyOrbTapExp ?? 0);
     if (tapExp >= 50) {
-      onToast("오늘의 구슬 수련 한도에 도달했습니다. (0.5레벨/일)");
+      onToast("오늘의 구슬 수련이 완료되었습니다. (10/10회, +0.5레벨)");
+
       return;
     }
     const gained = Math.min(5, 50 - tapExp);
     growOrb(gained);
-    addPoints(50);
     setOrb(prev => ({
       ...prev,
       dailyOrbTapExp: tapExp + gained,
@@ -637,8 +647,29 @@ const App: React.FC = () => {
         onToast={onToast}
       />
 
+      {/* 루멘 채굴 모달 (준비 중) */}
+      {showMiningModal && (
+        <div className="fixed inset-0 z-[6000] flex items-center justify-center px-6">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowMiningModal(false)}></div>
+          <div className="relative glass p-10 rounded-[3rem] border border-yellow-500/20 w-full max-w-sm text-center animate-in zoom-in-95 duration-300">
+            <div className="text-5xl mb-6">⛏️</div>
+            <h3 className="text-2xl font-mystic font-black text-yellow-400 mb-2 uppercase tracking-widest">Lumen Mining</h3>
+            <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-6 italic">루멘 채굴소</p>
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-8 space-y-3 text-left">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Coming Soon</p>
+              <p className="text-xs text-slate-300 leading-relaxed">광고 시청 또는 이벤트 참여로 루멘을 채굴할 수 있는 기능이 준비 중입니다.</p>
+              <div className="pt-2 border-t border-white/5 space-y-1.5">
+                <p className="text-[10px] text-yellow-500/70 font-bold">📺 광고 시청 — 300루멘 (하루 5회)</p>
+                <p className="text-[10px] text-slate-600 font-bold">🎯 이벤트 미션 — 추후 공개</p>
+              </div>
+            </div>
+            <button onClick={() => setShowMiningModal(false)} className="w-full py-4 bg-white/5 text-slate-400 font-black rounded-2xl uppercase tracking-widest text-xs hover:bg-white/10 transition-all">닫기</button>
+          </div>
+        </div>
+      )}
+
       {view === 'square' && <CelestialSquare profile={profile} orb={orb} onUpdatePoints={updatePoints} onUpdateFavorites={updateFavorites} onBack={() => setView('main')} onToast={onToast} onGrowFromPost={handlePostCreated} isAdmin={isAdmin} />}
-      {view === 'profile' && <UserProfilePage profile={profile} orb={orb} archives={archives} onUpdateProfile={onUpdateProfile} onUpdateOrb={onUpdateOrb} onWithdraw={handleWithdrawAction} onBack={() => setView('main')} onToast={onToast} isAdmin={isAdmin} />}
+      {view === 'profile' && <UserProfilePage profile={profile} orb={orb} archives={archives} onUpdateProfile={onUpdateProfile} onUpdateOrb={onUpdateOrb} onWithdraw={handleWithdrawAction} onBack={() => setView('main')} onToast={onToast} isAdmin={isAdmin} subAdminConfig={subAdminConfig} onSubAdminConfigChange={setSubAdminConfig} />}
       {view === 'analysis' && <MysticAnalysisLab lottoHistory={lottoHistory} onBack={() => setView('main')} />}
       {offeringData && <DivineEffect amount={offeringData.amount} multiplier={offeringData.multiplier} onComplete={handleOfferingComplete} />}
       {toast && (<div className="fixed inset-0 flex items-center justify-center z-[6000] pointer-events-none px-6"><div className="bg-slate-900/40 backdrop-blur-3xl text-white px-12 py-7 rounded-[2.5rem] shadow-[0_40px_100px_rgba(0,0,0,0.8)] border border-white/10 text-center animate-in zoom-in-95 duration-500 max-w-md"><p className="text-xl font-bold leading-tight whitespace-pre-line">{toast}</p></div></div>)}
@@ -671,7 +702,8 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <header className="sticky top-0 z-[100] glass border-b border-white/5 px-8 py-4 flex justify-between items-center">
+      <header className="sticky top-0 z-[100] border-b border-white/5 px-8 py-4 flex justify-between items-center">
+        <div className="absolute inset-0 bg-white/[0.02] backdrop-blur-xl -z-10 pointer-events-none" />
         <div className="flex items-center space-x-4">
           <img src="/s_mlotto_logo.png" alt="Mystic" className="w-10 h-10 object-contain drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
           <div className="flex flex-col"><h2 className="text-2xl font-mystic font-black text-white tracking-widest leading-none">MYSTIC</h2><span className="text-[8px] text-indigo-400 uppercase font-bold tracking-[0.5em] mt-1">Lotto Resonance</span></div>
@@ -692,6 +724,7 @@ const App: React.FC = () => {
                 <div className="absolute top-full right-0 mt-2 w-56 bg-[#020617] p-2 rounded-2xl border border-white/10 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-200">
                   <button onClick={() => { setView('square'); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-indigo-600/20 text-indigo-100 text-xs font-black uppercase transition-all"><span>🌌</span><span>천상의 광장 가기</span></button>
                   <button onClick={() => { setView('analysis'); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-cyan-600/20 text-cyan-100 text-xs font-black uppercase transition-all"><span>📊</span><span>미스틱 분석 제단</span></button>
+                  <button onClick={() => { setShowMiningModal(true); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-yellow-600/20 text-yellow-100 text-xs font-black uppercase transition-all"><span>⛏️</span><span>루멘 채굴</span></button>
                   {isAdmin && (
                     <button onClick={() => { setIsAdminModalOpen(true); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-amber-600/20 text-amber-100 text-xs font-black uppercase transition-all"><span>🎫</span><span>당첨번호 등록 (Admin)</span></button>
                   )}
@@ -772,7 +805,8 @@ const App: React.FC = () => {
         {activeTab === 'archives' && <section className="animate-in fade-in duration-700"><Archives items={archives} orb={orb} onDelete={deleteArchive} /></section>}
       </main>
 
-      <footer className="fixed bottom-0 left-0 right-0 glass border-t border-white/10 px-10 py-8 flex items-center justify-between z-[200] backdrop-blur-3xl shadow-2xl">
+      <footer className="fixed bottom-0 left-0 right-0 border-t border-white/10 px-10 py-8 flex items-center justify-between z-[200] shadow-2xl">
+        <div className="absolute inset-0 bg-white/[0.02] backdrop-blur-3xl -z-10 pointer-events-none" />
          <div className="flex items-center space-x-8">
             <div className="relative">
               <OrbVisual level={orb.level} className="w-16 h-16 border-2 border-white/10" />
@@ -796,6 +830,46 @@ const App: React.FC = () => {
         .drop-shadow-glow { filter: drop-shadow(0 0 20px rgba(251, 191, 36, 0.4)); }
         .custom-scroll::-webkit-scrollbar { width: 6px; }
         .custom-scroll::-webkit-scrollbar-thumb { background: rgba(251, 191, 36, 0.2); border-radius: 10px; }
+
+        @keyframes star-drift {
+          0% { transform: translate(0, 0) scale(0); opacity: 0; }
+          15% { opacity: 1; transform: scale(1); }
+          85% { opacity: 0.6; transform: translate(30px, -20px) scale(0.8); }
+          100% { transform: translate(50px, -35px) scale(0); opacity: 0; }
+        }
+        .animate-star-drift { animation: star-drift linear infinite; }
+
+        @keyframes milkyway-flow {
+          from { background-position: 0 0; }
+          to { background-position: 600px 600px; }
+        }
+        .animate-milkyway-flow { animation: milkyway-flow 45s linear infinite; }
+
+        @keyframes milkyway-pan {
+          0% { transform: scale(1.1) translate(0, 0); }
+          50% { transform: scale(1.3) translate(-10px, -10px); }
+          100% { transform: scale(1.1) translate(0, 0); }
+        }
+        .animate-milkyway-pan { animation: milkyway-pan 60s ease-in-out infinite; }
+
+        @keyframes crystal-sweep {
+          0% { transform: translateX(-250%) skewX(-30deg); }
+          25% { transform: translateX(250%) skewX(-30deg); }
+          100% { transform: translateX(250%) skewX(-30deg); }
+        }
+        .animate-crystal-sweep { animation: crystal-sweep 18s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+
+        @keyframes pulse-slow {
+          0%, 100% { opacity: 0.04; transform: scale(1) translate(-50%, -50%); }
+          50% { opacity: 0.12; transform: scale(1.1) translate(-50%, -50%); }
+        }
+        .animate-pulse-slow { position: absolute; left: 50%; top: 50%; animation: pulse-slow 10s ease-in-out infinite; }
+
+        @keyframes spin-extremely-slow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .animate-spin-extremely-slow { animation: spin-extremely-slow 80s linear infinite; }
+
+        @keyframes spin-slow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .animate-spin-slow { animation: spin-slow 15s linear infinite; }
       `}</style>
     </div>
   );

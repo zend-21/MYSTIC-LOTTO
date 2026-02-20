@@ -218,6 +218,7 @@ export interface ChatRoom {
   deleteAt?: number; // 소멸 예정 타임스탬프
   icon?: string; // 방 대표 이모지 아이콘
   lastEnteredAt?: number; // 마지막 입장 타임스탬프 (3일 미방문 자동 소멸용)
+  renameCount?: number; // 행성명/아이콘 변경 횟수 (0 또는 undefined = 무료, 1이상 = 500L)
 }
 
 export interface BoardComment {
@@ -251,6 +252,20 @@ export interface BoardPost {
   mediaUrl?: string;
   mediaType?: 'image' | 'video' | 'youtube';
   comments: BoardComment[];
+}
+
+export interface ModelInfo {
+  model: string;
+  deprecationDate: string | null;
+  daysLeft: number | null;
+  warning: boolean;
+}
+
+export interface ModelStatus {
+  flash: ModelInfo;
+  pro: ModelInfo;
+  hasWarning: boolean;
+  checkedAt: number;
 }
 
 export const ORB_DECORATIONS: OrbDecoration[] = [

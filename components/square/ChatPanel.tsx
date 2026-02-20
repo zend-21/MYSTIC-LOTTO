@@ -1,14 +1,19 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { OrbState, ChatRoom, ChatMessage } from '../../types';
 import { OrbVisual } from '../FortuneOrb';
 import { db, auth } from '../../services/firebase';
 import {
   collection, query, onSnapshot, addDoc,
-  orderBy, limit, getDocs, startAfter, QueryDocumentSnapshot
+  orderBy, limit, getDocs, startAfter, QueryDocumentSnapshot,
+  doc, updateDoc, arrayUnion
 } from 'firebase/firestore';
 import { spendPoints } from '../../services/geminiService';
 
 const MSG_PAGE_SIZE = 50;
+
+export interface ChatPanelHandle {
+  getMessages: () => ChatMessage[];
+}
 
 interface ChatPanelProps {
   activeRoom: ChatRoom;
@@ -16,7 +21,7 @@ interface ChatPanelProps {
   onToast: (msg: string) => void;
 }
 
-const ChatPanel: React.FC<ChatPanelProps> = ({ activeRoom, orb, onToast }) => {
+const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(({ activeRoom, orb, onToast }, ref) => {
   const [currentTime, setCurrentTime] = useState(Date.now());
   const [realtimeMsgs, setRealtimeMsgs] = useState<ChatMessage[]>([]);
   const [historicalMsgs, setHistoricalMsgs] = useState<ChatMessage[]>([]);
@@ -26,10 +31,18 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ activeRoom, orb, onToast }) => {
   const [inputMsg, setInputMsg] = useState('');
   const [showGiftModal, setShowGiftModal] = useState<ChatMessage | null>(null);
   const [giftAmount, setGiftAmount] = useState('100');
+  const [isSending, setIsSending] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  // 입장 시각 — 이 시각 이후 메시지만 표시 (세션 기반 채팅)
+  const sessionStartRef = useRef<number>(Date.now());
   const currentDisplayName = orb.nickname || orb.uniqueTag || '익명';
-  const allMessages = [...historicalMsgs, ...realtimeMsgs];
+  // 세션 시작 이후 메시지만 필터링
+  const allMessages = realtimeMsgs.filter(m => m.timestamp >= sessionStartRef.current);
+
+  useImperativeHandle(ref, () => ({
+    getMessages: () => allMessages,
+  }));
 
   // 1초마다 현재 시간 업데이트 (행성 소멸 카운트다운용)
   useEffect(() => {
@@ -37,8 +50,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ activeRoom, orb, onToast }) => {
     return () => clearInterval(timer);
   }, []);
 
-  // 방이 바뀌면 이전 메시지 초기화
+  // 방이 바뀌면 세션 시작 시각 갱신 + 메시지 초기화
   useEffect(() => {
+    sessionStartRef.current = Date.now();
     setHistoricalMsgs([]);
     setMsgCursor(null);
     const q = query(
@@ -100,13 +114,18 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ activeRoom, orb, onToast }) => {
   };
 
   const handleGiftLumen = async () => {
+    if (isSending) return;
     const amount = parseInt(giftAmount);
     if (isNaN(amount) || amount <= 0) { onToast("전수할 기운의 양이 올바르지 않습니다."); return; }
     if (orb.points < amount) { onToast("보유하신 기운이 부족합니다."); return; }
     if (!showGiftModal || showGiftModal.userId === 'system' || !auth.currentUser) return;
+    const targetUser = showGiftModal;
+    setIsSending(true);
+    setShowGiftModal(null);
+    setGiftAmount('100');
     try {
       await spendPoints(amount, 'gift_lumen');
-      await addDoc(collection(db, "users", showGiftModal.userId, "inbox"), {
+      await addDoc(collection(db, "users", targetUser.userId, "inbox"), {
         amount,
         fromName: currentDisplayName,
         fromUid: auth.currentUser.uid,
@@ -116,15 +135,24 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ activeRoom, orb, onToast }) => {
         userId: "system",
         userName: "SYSTEM",
         userLevel: 0,
-        message: `${currentDisplayName}님이 ${showGiftModal.userName}님에게 ${amount.toLocaleString()} 루멘을 선물했습니다! ✨`,
+        message: `${currentDisplayName}님이 ${targetUser.userName}님에게 ${amount.toLocaleString()} 루멘을 선물했습니다! ✨`,
         timestamp: Date.now()
       });
-      onToast(`${showGiftModal.userName}님에게 ${amount.toLocaleString()} 루멘을 전수했습니다.`);
+      await updateDoc(doc(db, "users", auth.currentUser.uid), {
+        "orb.giftHistory": arrayUnion({
+          id: `sent_${Date.now()}`,
+          type: 'sent',
+          targetName: targetUser.userName,
+          amount,
+          timestamp: Date.now(),
+        })
+      });
+      onToast(`${targetUser.userName}님에게 ${amount.toLocaleString()} 루멘을 전수했습니다.`);
     } catch {
       onToast("선물 전송에 실패했습니다.");
+    } finally {
+      setIsSending(false);
     }
-    setShowGiftModal(null);
-    setGiftAmount('100');
   };
 
   const formatRemainingTime = (target: number) => {
@@ -163,17 +191,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ activeRoom, orb, onToast }) => {
 
         {/* 메시지 목록 */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-8 space-y-6 custom-scroll">
-          {hasMoreMessages && (
-            <div className="flex justify-center pt-2 pb-4">
-              <button
-                onClick={loadMoreMessages}
-                disabled={isLoadingMoreMsgs}
-                className="px-6 py-2.5 bg-white/5 border border-white/10 rounded-full text-[10px] font-black text-slate-400 uppercase tracking-widest hover:bg-white/10 transition-all disabled:opacity-50"
-              >
-                {isLoadingMoreMsgs ? '불러오는 중...' : '이전 메시지 보기'}
-              </button>
-            </div>
-          )}
+          <div className="flex justify-center pt-2 pb-4">
+            <p className="text-[9px] font-black text-slate-700 uppercase tracking-widest px-4 py-1.5 bg-white/[0.02] rounded-full border border-white/5">입장 이후의 대화만 표시됩니다</p>
+          </div>
           {allMessages.map(msg => {
             const isMe = auth.currentUser && msg.userId === auth.currentUser.uid;
             const isSystem = msg.userId === 'system';
@@ -184,11 +204,13 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ activeRoom, orb, onToast }) => {
             );
             return (
               <div key={msg.id} className={`flex items-start space-x-4 ${isMe ? 'flex-row-reverse space-x-reverse' : ''}`}>
-                <div className="relative group cursor-pointer" onClick={() => !isMe && setShowGiftModal(msg)}>
-                  <OrbVisual level={msg.userLevel} className="w-10 h-10 border border-white/10" />
-                  <div className="absolute -top-1 -right-1 bg-indigo-600 text-[8px] font-black px-1.5 py-0.5 rounded shadow-lg">LV.{msg.userLevel}</div>
-                  {!isMe && <div className="absolute inset-0 bg-yellow-500/80 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-slate-950 font-black text-[8px]">GIFT</div>}
-                </div>
+                {!isMe && (
+                  <div className="relative group cursor-pointer" onClick={() => setShowGiftModal(msg)}>
+                    <OrbVisual level={msg.userLevel} className="w-10 h-10 border border-white/10" />
+                    <div className="absolute -top-1 -right-1 bg-indigo-600 text-[8px] font-black px-1.5 py-0.5 rounded shadow-lg">LV.{msg.userLevel}</div>
+                    <div className="absolute inset-0 bg-yellow-500/80 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-slate-950 font-black text-[8px]">GIFT</div>
+                  </div>
+                )}
                 <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[70%]`}>
                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">{msg.userName}</span>
                   <div className={`px-5 py-3 rounded-2xl text-sm font-medium ${isMe ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-white/5 border border-white/5 text-slate-200 rounded-tl-none'}`}>{msg.message}</div>
@@ -235,6 +257,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ activeRoom, orb, onToast }) => {
       )}
     </>
   );
-};
+});
 
+ChatPanel.displayName = 'ChatPanel';
 export default ChatPanel;

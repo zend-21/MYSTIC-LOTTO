@@ -4,7 +4,7 @@ import { UserProfile, OrbState, ChatRoom, COST_ROOM_CREATE } from '../types';
 import { OrbVisual } from './FortuneOrb';
 import { spendPoints } from '../services/geminiService';
 import BoardPanel from './square/BoardPanel';
-import ChatPanel from './square/ChatPanel';
+import ChatPanel, { ChatPanelHandle } from './square/ChatPanel';
 
 const SUPER_ADMIN_UID = import.meta.env.VITE_SUPER_ADMIN_UID as string;
 
@@ -39,7 +39,7 @@ const ROOM_ICONS = [
 
 // Firebase imports
 import { db, auth, rtdb } from '../services/firebase';
-import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, orderBy, limit, getDocs, startAfter, QueryDocumentSnapshot } from "firebase/firestore";
+import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, orderBy, limit, getDocs, getDoc, startAfter, QueryDocumentSnapshot, arrayUnion } from "firebase/firestore";
 import { ref as rtdbRef, set as rtdbSet, remove as rtdbRemove, onDisconnect, onValue, get as rtdbGet } from 'firebase/database';
 
 interface CelestialSquareProps {
@@ -59,6 +59,14 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
   const [view, setView] = useState<'lounge' | 'chat' | 'board' | 'post-detail' | 'post-edit'>('lounge');
   const [activeRoom, setActiveRoom] = useState<ChatRoom | null>(null);
 
+  // 참여자 목록 (RTDB presence 기반)
+  const [participants, setParticipants] = useState<{ uid: string; name: string; uniqueTag: string; level: number }[]>([]);
+  const [showParticipantsModal, setShowParticipantsModal] = useState(false);
+  const chatPanelRef = useRef<ChatPanelHandle>(null);
+
+  // 선물 수신 불가 UID (최고관리자 + 부관리자)
+  const [privilegedUids, setPrivilegedUids] = useState<Set<string>>(new Set([SUPER_ADMIN_UID]));
+
   // 방 목록 (실시간 최신 + 이전 페이지)
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [lastRoomDoc, setLastRoomDoc] = useState<QueryDocumentSnapshot | null>(null);
@@ -73,6 +81,16 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
   const [showRoomMenu, setShowRoomMenu] = useState(false);
   const [showDestroyConfirm, setShowDestroyConfirm] = useState(false);
   const [showInstantDestroyConfirm, setShowInstantDestroyConfirm] = useState(false);
+
+  // 행성명 수정 모달 상태
+  const [showEditRoomModal, setShowEditRoomModal] = useState(false);
+  const [editRoomTitle, setEditRoomTitle] = useState('');
+  const [editRoomIcon, setEditRoomIcon] = useState('🪐');
+
+  // 참여자 목록 선물 모달 상태
+  const [giftTarget, setGiftTarget] = useState<{ uid: string; name: string; uniqueTag: string; level: number } | null>(null);
+  const [giftAmount, setGiftAmount] = useState('100');
+  const [isGiftSending, setIsGiftSending] = useState(false);
 
   // 아이콘 선택 상태
   const [newRoomIcon, setNewRoomIcon] = useState('🪐');
@@ -100,6 +118,16 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
       setIsLoadingMoreRooms(false);
     }
   };
+
+  // 부관리자 UID 목록 로드 (마운트 시 1회)
+  useEffect(() => {
+    getDoc(doc(db, "config", "subAdmins")).then(snap => {
+      if (snap.exists()) {
+        const uids = new Set([SUPER_ADMIN_UID, ...Object.keys(snap.data())]);
+        setPrivilegedUids(uids);
+      }
+    }).catch(() => {});
+  }, []);
 
   // Real-time listener for Rooms (라운지 화면일 때만 구독)
   useEffect(() => {
@@ -145,17 +173,30 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
     const presenceRef = rtdbRef(rtdb, `presence/${activeRoom.id}/${uid}`);
     const roomPresenceRef = rtdbRef(rtdb, `presence/${activeRoom.id}`);
 
-    rtdbSet(presenceRef, true).catch(() => {});
+    rtdbSet(presenceRef, { name: currentDisplayName, uniqueTag: orb.uniqueTag || '', level: orb.level }).catch(() => {});
     onDisconnect(presenceRef).remove();
     updateDoc(roomRef, { lastEnteredAt: Date.now() }).catch(() => {});
 
     const unsubPresence = onValue(roomPresenceRef, (snap) => {
-      const count = snap.exists() ? Object.keys(snap.val()).length : 0;
-      updateDoc(roomRef, { participantCount: count }).catch(() => {});
+      if (snap.exists()) {
+        const data = snap.val() as Record<string, { name: string; uniqueTag: string; level: number }>;
+        const list = Object.entries(data).map(([uid, info]) => ({
+          uid,
+          name: info.name || '익명',
+          uniqueTag: info.uniqueTag || '',
+          level: info.level || 1,
+        }));
+        setParticipants(list);
+        updateDoc(roomRef, { participantCount: list.length }).catch(() => {});
+      } else {
+        setParticipants([]);
+        updateDoc(roomRef, { participantCount: 0 }).catch(() => {});
+      }
     });
 
     return () => {
       unsubPresence();
+      setParticipants([]);
       rtdbRemove(presenceRef)
         .then(() => rtdbGet(roomPresenceRef))
         .then((snap) => {
@@ -228,6 +269,9 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
   const handleSelectIcon = async (icon: string) => {
     if (showIconPicker === 'create') {
       setNewRoomIcon(icon);
+      setShowIconPicker(null);
+    } else if (showIconPicker === 'edit') {
+      setEditRoomIcon(icon);
       setShowIconPicker(null);
     } else if (showIconPicker) {
       try {
@@ -302,6 +346,101 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
     }
   };
 
+  // 대화내용 갈무리 저장
+  const handleSaveCapture = async () => {
+    if (!auth.currentUser || !activeRoom) return;
+    setShowRoomMenu(false);
+    const messages = chatPanelRef.current?.getMessages() || [];
+    try {
+      await addDoc(collection(db, "users", auth.currentUser.uid, "chatCaptures"), {
+        savedAt: Date.now(),
+        roomId: activeRoom.id,
+        roomName: activeRoom.title,
+        creatorName: activeRoom.creatorName,
+        participants: participants.map(p => ({ uid: p.uid, name: p.name, uniqueTag: p.uniqueTag })),
+        messages: messages.map(m => ({
+          userId: m.userId,
+          userName: m.userName,
+          message: m.message,
+          timestamp: m.timestamp,
+        })),
+      });
+      onToast("대화내용이 갈무리되었습니다.");
+    } catch {
+      onToast("갈무리 저장에 실패했습니다.");
+    }
+  };
+
+  // 행성명/아이콘 수정
+  const handleEditRoom = async () => {
+    if (!activeRoom || !auth.currentUser) return;
+    if (!editRoomTitle.trim()) { onToast("행성명을 입력해주세요."); return; }
+    const renameCount = activeRoom.renameCount ?? 0;
+    const cost = renameCount >= 1 ? 500 : 0;
+    if (cost > 0 && orb.points < cost) {
+      onToast("루멘이 부족합니다. 행성명 수정에는 500루멘이 필요합니다.");
+      return;
+    }
+    try {
+      const roomRef = doc(db, "square", "rooms", "list", activeRoom.id);
+      await updateDoc(roomRef, {
+        title: editRoomTitle,
+        icon: editRoomIcon,
+        renameCount: renameCount + 1,
+      });
+      if (cost > 0) await spendPoints(cost, 'room_rename');
+      setShowEditRoomModal(false);
+      onToast(cost > 0 ? `행성명이 변경되었습니다. (500루멘 소모)` : "행성명이 변경되었습니다.");
+    } catch {
+      onToast("행성명 변경에 실패했습니다.");
+    }
+  };
+
+  // 참여자 목록 → 루멘 선물
+  const handleGiftToParticipant = async () => {
+    if (isGiftSending || !giftTarget || !auth.currentUser) return;
+    if (privilegedUids.has(giftTarget.uid)) { onToast("관리자에게는 루멘을 선물할 수 없습니다."); setGiftTarget(null); return; }
+    const amount = parseInt(giftAmount);
+    if (isNaN(amount) || amount <= 0) { onToast("전수할 기운의 양이 올바르지 않습니다."); return; }
+    if (orb.points < amount) { onToast("보유하신 기운이 부족합니다."); return; }
+    setIsGiftSending(true);
+    const target = giftTarget;
+    setGiftTarget(null);
+    setGiftAmount('100');
+    try {
+      await spendPoints(amount, 'gift_lumen');
+      await addDoc(collection(db, "users", target.uid, "inbox"), {
+        amount,
+        fromName: currentDisplayName,
+        fromUid: auth.currentUser.uid,
+        timestamp: Date.now(),
+      });
+      await updateDoc(doc(db, "users", auth.currentUser.uid), {
+        "orb.giftHistory": arrayUnion({
+          id: `sent_${Date.now()}`,
+          type: 'sent',
+          targetName: target.name,
+          amount,
+          timestamp: Date.now(),
+        }),
+      });
+      if (activeRoom) {
+        await addDoc(collection(db, "square", "rooms", "list", activeRoom.id, "messages"), {
+          userId: "system",
+          userName: "SYSTEM",
+          userLevel: 0,
+          message: `${currentDisplayName}님이 ${target.name}님에게 ${amount.toLocaleString()} 루멘을 선물했습니다! ✨`,
+          timestamp: Date.now(),
+        });
+      }
+      onToast(`${target.name}님에게 ${amount.toLocaleString()} 루멘을 전수했습니다.`);
+    } catch {
+      onToast("선물 전송에 실패했습니다.");
+    } finally {
+      setIsGiftSending(false);
+    }
+  };
+
   // 즐겨찾기 우선 정렬
   const sortedRooms = [...rooms].sort((a, b) => {
     const aFav = (orb.favoriteRoomIds || []).includes(a.id);
@@ -316,7 +455,8 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
 
   return (
     <div className="fixed inset-0 z-[5000] bg-[#020617] text-slate-200 flex flex-col animate-dimension-shift">
-      <header className="relative z-[100] glass border-b border-white/5 px-8 py-6 flex justify-between items-center backdrop-blur-3xl shrink-0 shadow-2xl">
+      <header className="relative z-[100] border-b border-white/5 px-8 py-6 flex justify-between items-center shrink-0 shadow-2xl">
+        <div className="absolute inset-0 bg-white/[0.02] backdrop-blur-3xl -z-10 pointer-events-none" />
         <div className="flex items-center space-x-6">
           <button
             onClick={() => {
@@ -330,7 +470,7 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
           </button>
           <div className="flex flex-col">
             <h2 className="text-xl font-mystic font-black text-white tracking-widest leading-none uppercase">
-              {view === 'lounge' ? 'Celestial Square' : view === 'chat' ? activeRoom?.title : 'Resonance Board'}
+              {view === 'lounge' ? 'Celestial Square' : view === 'chat' ? `${activeRoom?.icon ? activeRoom.icon + ' ' : ''}${activeRoom?.title} (${participants.length})` : 'Resonance Board'}
             </h2>
             <div className="flex items-center space-x-3 mt-1.5">
                <button onClick={() => setView('lounge')} className={`text-[9px] font-black uppercase tracking-widest ${view === 'lounge' || view === 'chat' ? 'text-indigo-400' : 'text-slate-500'}`}>Lounge</button>
@@ -366,6 +506,14 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
                     <div className="absolute top-full right-0 mt-3 w-52 bg-slate-900 border border-indigo-500/30 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] z-[200] p-2 animate-in fade-in zoom-in-95 duration-200">
                        <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest px-4 py-2 border-b border-white/5 mb-1">Planet Control</p>
                        <button onClick={() => { onToast("알림 설정이 변경되었습니다."); setShowRoomMenu(false); }} className="w-full text-left p-3 rounded-xl hover:bg-white/5 text-[10px] font-bold text-slate-300 transition-colors flex items-center space-x-2"><span>🛎️</span><span>알림 끄기</span></button>
+                       <button onClick={() => { setShowParticipantsModal(true); setShowRoomMenu(false); }} className="w-full text-left p-3 rounded-xl hover:bg-white/5 text-[10px] font-bold text-slate-300 transition-colors flex items-center space-x-2"><span>👥</span><span>참여자 목록</span></button>
+                       <button onClick={handleSaveCapture} className="w-full text-left p-3 rounded-xl hover:bg-white/5 text-[10px] font-bold text-slate-300 transition-colors flex items-center space-x-2"><span>🗂️</span><span>대화내용 저장</span></button>
+                       {activeRoom && auth.currentUser && activeRoom.creatorId === auth.currentUser.uid && (
+                         <button onClick={() => { setEditRoomTitle(activeRoom.title); setEditRoomIcon(activeRoom.icon || '🪐'); setShowEditRoomModal(true); setShowRoomMenu(false); }} className="w-full text-left p-3 rounded-xl hover:bg-white/5 text-[10px] font-bold text-slate-300 transition-colors flex items-center space-x-2">
+                           <span>✏️</span>
+                           <span>행성명 수정 {(activeRoom.renameCount ?? 0) >= 1 ? '(500L)' : '(무료)'}</span>
+                         </button>
+                       )}
                        {activeRoom && auth.currentUser && (() => {
                          const uid = auth.currentUser!.uid;
                          const isAdmin = uid === SUPER_ADMIN_UID;
@@ -483,6 +631,7 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
         {/* 채팅창 */}
         {view === 'chat' && activeRoom && (
           <ChatPanel
+            ref={chatPanelRef}
             activeRoom={activeRoom}
             orb={orb}
             onToast={onToast}
@@ -552,6 +701,124 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
                 />
                 <button onClick={handleCreateRoom} className="w-full py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-sm hover:bg-indigo-500 transition-all">탄생시키기 (1,000 L)</button>
              </div>
+          </div>
+        </div>
+      )}
+
+      {/* 참여자 목록 모달 */}
+      {showParticipantsModal && activeRoom && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center px-6">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowParticipantsModal(false)}></div>
+          <div className="relative glass p-8 rounded-[3rem] border border-indigo-500/20 w-full max-w-sm animate-in zoom-in-95 duration-300">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-lg font-mystic font-black text-white uppercase tracking-widest">참여자 목록</h3>
+                <p className="text-[10px] text-slate-500 font-bold mt-0.5">{participants.length}명 공명 중</p>
+              </div>
+              <button onClick={() => setShowParticipantsModal(false)} className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors text-slate-400">✕</button>
+            </div>
+            <div className="space-y-2 max-h-80 overflow-y-auto custom-scroll">
+              {(() => {
+                const creator = participants.find(p => p.uid === activeRoom.creatorId);
+                const others = participants.filter(p => p.uid !== activeRoom.creatorId);
+                const sorted = creator ? [creator, ...others] : others;
+                return sorted.length > 0 ? sorted.map(p => {
+                  const isMe = auth.currentUser?.uid === p.uid;
+                  const isPrivileged = privilegedUids.has(p.uid);
+                  const canGift = !isMe && !isPrivileged;
+                  return (
+                    <div
+                      key={p.uid}
+                      onClick={() => { if (canGift) { setGiftTarget(p); setGiftAmount('100'); } }}
+                      className={`flex items-center space-x-3 p-3 rounded-2xl bg-white/5 transition-colors ${canGift ? 'cursor-pointer hover:bg-indigo-500/10 active:scale-[0.98]' : 'opacity-60'}`}
+                    >
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm ${p.uid === activeRoom.creatorId ? 'bg-yellow-500/20 text-yellow-400' : 'bg-indigo-500/10 text-indigo-400'}`}>
+                        {p.uid === activeRoom.creatorId ? '👑' : '🪐'}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-black text-white truncate">
+                          <span className="text-[10px] text-indigo-400 font-black mr-1.5">LV.{p.level}</span>
+                          {p.name}
+                        </p>
+                        {p.uniqueTag && (
+                          <p
+                            className="text-[10px] text-slate-500 font-bold hover:text-indigo-400 transition-colors cursor-pointer"
+                            onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(p.uniqueTag); onToast("아이디가 복사되었습니다."); }}
+                          >{p.uniqueTag}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        {p.uid === activeRoom.creatorId && (
+                          <span className="text-[9px] font-black text-yellow-500 bg-yellow-500/10 px-2 py-1 rounded-lg uppercase tracking-widest">성주</span>
+                        )}
+                        {canGift && <span className="text-[9px] font-black text-yellow-400 bg-yellow-500/10 px-2 py-1 rounded-lg">🎁</span>}
+                      </div>
+                    </div>
+                  );
+                }) : (
+                  <p className="text-center text-[10px] text-slate-600 font-black uppercase py-6">참여자 없음</p>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 참여자 선물 모달 */}
+      {giftTarget && (
+        <div className="fixed inset-0 z-[11000] flex items-center justify-center px-6">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setGiftTarget(null)}></div>
+          <div className="relative glass p-10 rounded-[3rem] border border-yellow-500/20 w-full max-w-sm text-center animate-in zoom-in-95 duration-300">
+            <div className="text-4xl mb-4">🎁</div>
+            <h3 className="text-xl font-mystic font-black text-yellow-500 mb-1 uppercase tracking-widest">Transmit Essence</h3>
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-6 italic">
+              <span className="text-indigo-400">LV.{giftTarget.level}</span> {giftTarget.name}님에게 기운을 전수합니다.
+            </p>
+            <div className="space-y-4">
+              <div className="flex items-center bg-slate-950/50 border border-slate-800 rounded-2xl p-2">
+                <button onClick={() => setGiftAmount(v => String(Math.max(100, parseInt(v) - 100)))} className="w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center text-slate-400 hover:text-white text-xl font-black">−</button>
+                <input type="number" value={giftAmount} onChange={e => setGiftAmount(e.target.value)} className="flex-1 bg-transparent text-center font-black text-2xl text-white outline-none tabular-nums" />
+                <button onClick={() => setGiftAmount(v => String(parseInt(v) + 100))} className="w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center text-slate-400 hover:text-white text-xl font-black">+</button>
+              </div>
+              <button onClick={handleGiftToParticipant} disabled={isGiftSending} className="w-full py-5 bg-yellow-600 text-slate-950 font-black rounded-2xl shadow-xl uppercase tracking-widest text-sm disabled:opacity-50">
+                루멘 전수하기
+              </button>
+              <button onClick={() => setGiftTarget(null)} className="w-full py-3 bg-white/5 text-slate-500 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-white/10">취소</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 행성명 수정 모달 */}
+      {showEditRoomModal && activeRoom && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center px-6">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowEditRoomModal(false)}></div>
+          <div className="relative glass p-10 rounded-[3rem] border border-indigo-500/20 w-full max-w-sm text-center animate-in zoom-in-95 duration-300">
+            <h3 className="text-xl font-mystic font-black text-white mb-1 uppercase tracking-widest">Edit Planet</h3>
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-6 italic">
+              {(activeRoom.renameCount ?? 0) >= 1 ? '2회차 이후 수정은 500루멘이 소모됩니다.' : '첫 번째 수정은 무료입니다.'}
+            </p>
+            <div className="space-y-4">
+              <div className="flex items-center justify-center space-x-4">
+                <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-4xl">{editRoomIcon}</div>
+                <button
+                  onClick={() => setShowIconPicker('edit')}
+                  className="px-5 py-2.5 bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 font-black text-[10px] uppercase tracking-widest rounded-xl hover:bg-indigo-500/30 transition-all"
+                >아이콘 변경</button>
+              </div>
+              <input
+                type="text"
+                value={editRoomTitle}
+                onChange={e => setEditRoomTitle(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleEditRoom()}
+                placeholder="새 행성명을 입력하세요"
+                className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-white text-center font-bold focus:border-indigo-500 outline-none"
+              />
+              <button onClick={handleEditRoom} className="w-full py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-sm hover:bg-indigo-500 transition-all">
+                변경하기 {(activeRoom.renameCount ?? 0) >= 1 ? '(500 L)' : '(무료)'}
+              </button>
+              <button onClick={() => setShowEditRoomModal(false)} className="w-full py-3 bg-white/5 text-slate-500 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-white/10">취소</button>
+            </div>
           </div>
         </div>
       )}
