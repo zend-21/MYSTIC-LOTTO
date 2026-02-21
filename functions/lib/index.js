@@ -83,6 +83,7 @@ async function checkBalance(uid, amount) {
 // 오늘의 운세 + 로또번호 (COST: 1,000 루멘)
 // ──────────────────────────────────────────────
 exports.getFortuneAndNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], region: "asia-northeast3", timeoutSeconds: 300 }, async (request) => {
+    var _a, _b;
     if (!request.auth)
         throw new https_1.HttpsError("unauthenticated", "로그인이 필요합니다.");
     const uid = request.auth.uid;
@@ -191,8 +192,10 @@ exports.getFortuneAndNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], 
         },
     }));
     const text = response.text;
-    if (!text)
+    if (!text) {
+        console.error("[getFortuneAndNumbers] response.text is null. finishReason:", (_b = (_a = response.candidates) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.finishReason);
         throw new https_1.HttpsError("internal", "AI 응답이 비어있습니다.");
+    }
     const result = JSON.parse(text);
     // ③ AI 성공 후에만 루멘 차감 + 결과 Firestore 저장 (트랜잭션)
     const sessionRef = db.collection("users").doc(uid).collection("session").doc("data");
@@ -280,6 +283,7 @@ exports.getScientificReport = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], r
 // 연간 천명 대운 리포트 (COST: 50,000 루멘)
 // ──────────────────────────────────────────────
 exports.getFixedDestinyNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], region: "asia-northeast3", timeoutSeconds: 300 }, async (request) => {
+    var _a, _b, _c, _d, _e, _f;
     if (!request.auth)
         throw new https_1.HttpsError("unauthenticated", "로그인이 필요합니다.");
     const uid = request.auth.uid;
@@ -291,36 +295,96 @@ exports.getFixedDestinyNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY]
         throw new https_1.HttpsError("invalid-argument", "프로필 정보가 필요합니다.");
     }
     const ai = new genai_1.GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
-    const calendarInfo = profile.calendarType === "lunar"
-        ? `음력 (${profile.isIntercalary ? "윤달" : "평달"})`
-        : "양력";
-    const currentYear = new Date().getFullYear();
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    // 음력 설날(춘절) 그레고리력 날짜 테이블 — 2050년까지
+    const LUNAR_NEW_YEAR = {
+        2024: "2024-02-10",
+        2025: "2025-01-29",
+        2026: "2026-02-17",
+        2027: "2027-02-06",
+        2028: "2028-01-26",
+        2029: "2029-02-13",
+        2030: "2030-02-03",
+        2031: "2031-01-23",
+        2032: "2032-02-11",
+        2033: "2033-01-31",
+        2034: "2034-02-19",
+        2035: "2035-02-08",
+        2036: "2036-01-28",
+        2037: "2037-02-15",
+        2038: "2038-02-04",
+        2039: "2039-01-24",
+        2040: "2040-02-12",
+        2041: "2041-02-01",
+        2042: "2042-01-22",
+        2043: "2043-02-10",
+        2044: "2044-01-30",
+        2045: "2045-02-17",
+        2046: "2046-02-06",
+        2047: "2047-01-26",
+        2048: "2048-02-14",
+        2049: "2049-02-02",
+        2050: "2050-01-23",
+    };
+    const lnyStr = (_a = LUNAR_NEW_YEAR[currentYear]) !== null && _a !== void 0 ? _a : `${currentYear}-02-05`;
+    const isBeforeLNY = now < new Date(lnyStr);
+    const isLunar = profile.calendarType === "lunar";
+    const birthDateInfo = isLunar
+        ? `음력 ${profile.birthDate}${profile.isIntercalary ? " (윤달)" : ""} ${profile.birthTime}`
+        : `양력 ${profile.birthDate} ${profile.birthTime}`;
+    const sajuYearNote = isBeforeLNY
+        ? `현재(${now.toISOString().slice(0, 10)})는 아직 올해 음력 설(${lnyStr}) 이전입니다. 따라서 사주의 연주(年柱)는 아직 바뀌지 않았으나, 이 리포트는 다가올 음력 설(${lnyStr})을 기점으로 개막하는 ${currentYear}년 세운(歲運)을 사전에 분석하는 것입니다. 사주 분석은 반드시 ${currentYear}년 세운 기준으로 작성하세요.`
+        : `현재(${now.toISOString().slice(0, 10)})는 이미 올해 음력 설(${lnyStr})을 지났습니다. ${currentYear}년 세운(歲運)이 진행 중입니다.`;
     const locationInfo = profile.lat && profile.lon
         ? `출생지 정밀 좌표: 위도 ${profile.lat}, 경도 ${profile.lon}`
         : `출생지(도시): ${profile.birthCity}`;
+    const birthRuleNote = isLunar
+        ? `제공된 생년월일은 음력입니다.
+    · 사주(四柱) 섹션: 음력 생년월일(${birthDateInfo})을 그대로 사용하세요. 사주 설명에서 생일을 언급할 때는 반드시 음력 날짜만 표기하고, 양력 날짜나 양력 변환 과정은 절대 언급하지 마세요.
+    · 타로·점성술 섹션: 위 음력 날짜를 양력으로 환산한 날짜를 사용하세요. 해당 섹션의 설명에서 생일을 언급해야 할 경우 양력 날짜를 표기하세요.`
+        : `제공된 생년월일은 양력입니다.
+    · 타로·점성술 섹션: 양력 생년월일(${birthDateInfo})을 그대로 사용하세요. 해당 섹션 설명에서 생일을 언급할 때 양력 날짜를 표기하세요.
+    · 사주(四柱) 섹션: 양력 날짜를 음력으로 환산하여 사용하세요. 사주 설명에서 생일을 언급할 때는 환산된 음력 날짜를 표기하세요.`;
     const prompt = `
     사용자: ${profile.name}
-    사주 정보: ${profile.birthDate} ${profile.birthTime} (${calendarInfo})
+    생년월일·생시: ${birthDateInfo}
     위치 정보: ${locationInfo}
     분석 연도: ${currentYear}년
+
+    ── 생년월일 사용 기준 (반드시 준수) ────────────────────────────
+    ${birthRuleNote}
+    ────────────────────────────────────────────────────────────────
+
+    ── 사주(四柱) 연도 기준 (반드시 준수) ──────────────────────────
+    ${sajuYearNote}
+    · 사주의 연주(年柱)는 입춘(立春)이 아닌 음력 설날을 기준으로 바뀝니다.
+    · 절기·날짜를 언급할 때 '~일경', '~무렵' 같은 어림 표현을 쓰지 마세요.
+      정확한 날짜를 알 수 없을 때는 절기 이름만 표기하세요.
+    ────────────────────────────────────────────────────────────────
 
     미션: 50,000 루멘 가치의 최고급 프리미엄 '천명 대운 리포트'를 작성하세요. 총 분량은 3,000자 내외의 초장문이어야 합니다.
 
     핵심 원칙:
-    1. 사주 분석 기준: 리셋일인 1월 1일과 별개로, 명리학적 분석은 해당 연도의 '음력 설(입춘)'을 기점으로 삼으세요. 현재가 1월이라면 전해의 기운에서 새해의 기운으로 넘어가는 과도기적 특징을 반드시 포함하세요.
+    1. 위의 '생년월일 사용 기준' 및 '사주 연도 기준' 섹션을 철저히 준수하세요.
     2. 격조 높은 문체: 고전 철학과 현대 통계를 아우르는 전문가적이고 신비로운 어조를 유지하세요.
 
     필수 포함 섹션 및 지시사항:
-    - 'luckyNumbers': 올해 사용자를 수호할 1개 또는 2개의 '천명수'를 도출하세요.
-    - 'numberExplanations': 왜 이 숫자가 올해의 수호수인지 사주와 수비학적 관점에서 500자 이상 아주 상세히 설명하세요.
-    - 'luckyColor': 올해의 기운을 보강해줄 행운의 색상과 활용법을 서술하세요.
+    - 'luckyNumbers': 올해 사용자를 수호할 정확히 4개의 '천명수'를 도출하세요. 반드시 1에서 45 사이의 서로 다른 정수여야 합니다. 4개의 숫자는 반드시 아래 4가지 방법으로 각각 1개씩 도출하며, 모두 ${currentYear}년에 특화된 값으로 매년 달라져야 합니다(평생 고정값 사용 금지):
+      ① 사주 세운수(歲運數): ${currentYear}년의 60갑자 순번(甲子=1, 乙丑=2, … 癸亥=60 순환)을 1~45 범위로 환산한 값. 2026년은 丙午년(43번째)이므로 43. 단, 결과가 45를 초과하면 45를 뺀 값을 사용하세요.
+      ② 개인 연도수(Personal Year Number): 사용자의 생월+생일+${currentYear}년을 모두 더한 뒤 두 자리 이하가 될 때까지 환원. 단, 환원 과정에서 1~45 범위 내의 두 자리 중간값(11, 22, 33, 44)이 나오면 그대로 사용하고, 최종값이 반드시 1~45 사이여야 합니다.
+      ③ 목성 트랜짓 도수: ${currentYear}년 목성(Jupiter)이 황도를 통과하는 주요 위치의 도수(0~360°)를 45로 나눈 나머지에 1을 더한 값(1~45). 목성의 실제 천문 데이터를 기반으로 계산하세요.
+      ④ 연도별 타로 연간 카드수: ${currentYear}년의 수비학적 연도수(2+0+2+6=10 등)와 사용자 생월+생일을 합산한 개인 연간 타로 포지션을 메이저 아르카나(0~21) 내에서 환원한 뒤, 해당 카드 번호에 2를 곱하거나 연도수를 더해 1~45 범위로 확장하세요.
+    - 'numberExplanations': 위 4개 숫자 각각에 대해, 어떤 방법(①세운수/②개인연도수/③목성트랜짓/④연간타로)으로 왜 이 숫자가 도출되었는지 구체적인 계산 과정을 포함하여 300자 이상 상세히 풀이하세요. 각 풀이에서 생일을 언급할 때 해당 분야의 기준(사주→음력, 타로·점성술→양력)에 맞는 날짜를 표기하세요.
+    - 'luckyColor': 올해의 기운을 보강해줄 행운의 색상명(한글+영문)과 정확한 16진수 색상코드(예: #1a2b3c)를 함께 기재하세요.
+    - 'luckyColorDescription': 위 색상이 왜 올해의 행운색인지, 사주·오행·심리학적 근거와 실생활 활용법을 300자 내외로 서술하세요. 반드시 풀이 본문 안에 해당 색상의 16진수 코드(예: #FFBF00)를 한 번 이상 명시하세요.
     - 'overallFortune': 한 해 전체의 운명적 흐름, 기대할 만한 대운의 시기, 강력한 경고 메시지.
     - 'planningStrategy': 올해 운을 극대화하기 위한 구체적인 인생 계획 수립 전략 (전반기/후반기 구분).
     - 'bestMonths' & 'worstMonths': 가장 기운이 왕성한 달과 가장 신중해야 할 달을 구체적으로 지목하고 이유를 설명하세요.
     - 'wealthDetailed', 'loveDetailed', 'healthDetailed': 각 섹션별로 700자 이상의 초장문 풀이. (조심할 점, 도전할 점 포함)
-    - 'tarotDetailed': 올해를 상징하는 타로 카드를 선정하고 그 의미를 500자 이상 서술하세요.
-    - 'astrologyDetailed': 목성과 토성의 이동, 사용자 하우스의 변화를 포함한 점성학적 연간 트랜짓 리포트.
-    - 'sajuDeepDive': 음력 설 기준 세운 분석.
+    - 'tarotDetailed': 올해를 상징하는 타로 카드를 선정하고 그 의미를 500자 이상 서술하세요. 생일 언급 시 양력 날짜 사용.
+    - 'astrologyDetailed': 목성과 토성의 이동, 사용자 하우스의 변화를 포함한 점성학적 연간 트랜짓 리포트. 생일 언급 시 양력 날짜 사용.
+    - 'sajuDeepDive': 음력 설 기준 세운(歲運) 심층 분석. 사주 풀이에서 생년월일 언급 시 반드시 음력 날짜만 사용하고 양력을 언급하지 마세요.
   `;
     const proModel = await getActiveModel("pro");
     const response = await callWithRetry(() => ai.models.generateContent({
@@ -333,6 +397,7 @@ exports.getFixedDestinyNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY]
                 properties: {
                     luckyNumbers: { type: genai_1.Type.ARRAY, items: { type: genai_1.Type.INTEGER } },
                     luckyColor: { type: genai_1.Type.STRING },
+                    luckyColorDescription: { type: genai_1.Type.STRING },
                     destinyDescription: { type: genai_1.Type.STRING },
                     planningStrategy: { type: genai_1.Type.STRING },
                     bestMonths: { type: genai_1.Type.STRING },
@@ -374,7 +439,7 @@ exports.getFixedDestinyNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY]
                     recommendationReason: { type: genai_1.Type.STRING },
                 },
                 required: [
-                    "luckyNumbers", "luckyColor", "destinyDescription", "planningStrategy",
+                    "luckyNumbers", "luckyColor", "luckyColorDescription", "destinyDescription", "planningStrategy",
                     "bestMonths", "worstMonths", "wealthDetailed", "loveDetailed",
                     "healthDetailed", "tarotDetailed", "tarotCardName", "astrologyDetailed",
                     "sajuDeepDive", "numberExplanations", "sajuSummary",
@@ -383,14 +448,47 @@ exports.getFixedDestinyNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY]
         },
     }));
     const text = response.text;
-    if (!text)
+    if (!text) {
+        console.error("[getFixedDestinyNumbers] response.text is null. finishReason:", (_c = (_b = response.candidates) === null || _b === void 0 ? void 0 : _b[0]) === null || _c === void 0 ? void 0 : _c.finishReason, "safetyRatings:", JSON.stringify((_e = (_d = response.candidates) === null || _d === void 0 ? void 0 : _d[0]) === null || _e === void 0 ? void 0 : _e.safetyRatings));
         throw new https_1.HttpsError("internal", "AI 응답이 비어있습니다.");
-    const result = JSON.parse(text);
+    }
+    let result;
+    try {
+        result = JSON.parse(text);
+    }
+    catch (parseErr) {
+        console.error("[getFixedDestinyNumbers] JSON.parse failed. raw:", text === null || text === void 0 ? void 0 : text.slice(0, 300));
+        throw new https_1.HttpsError("internal", "AI 응답 파싱 실패");
+    }
     // ③ AI 성공 후에만 루멘 차감 + 결과 저장 (트랜잭션)
     const sessionRef = db.collection("users").doc(uid).collection("session").doc("data");
+    const orbRef = db.collection("users").doc(uid).collection("orb").doc("data");
+    const savedAt = Date.now();
+    const annual = {
+        year: currentYear,
+        numbers: result.luckyNumbers,
+        luckyColor: result.luckyColor,
+        luckyColorDescription: (_f = result.luckyColorDescription) !== null && _f !== void 0 ? _f : "",
+        reason: result.destinyDescription,
+        planningStrategy: result.planningStrategy,
+        bestMonths: result.bestMonths,
+        worstMonths: result.worstMonths,
+        wealthDetailed: result.wealthDetailed,
+        loveDetailed: result.loveDetailed,
+        healthDetailed: result.healthDetailed,
+        tarotDetailed: result.tarotDetailed,
+        tarotCardName: result.tarotCardName,
+        astrologyDetailed: result.astrologyDetailed,
+        sajuDeepDive: result.sajuDeepDive,
+        numberExplanations: result.numberExplanations,
+        timestamp: savedAt,
+    };
     await db.runTransaction(async (tx) => {
         await deductPoints(uid, COST_ANNUAL, tx);
-        tx.set(sessionRef, { annual: { data: result, savedAt: Date.now(), viewed: false } }, { merge: true });
+        // session: 클라이언트 수신용 (viewed 처리)
+        tx.set(sessionRef, { annual: { data: result, savedAt, viewed: false } }, { merge: true });
+        // orb: 영구 저장 — 클라이언트가 끊겨도 복구 창 없이 항상 유효
+        tx.set(orbRef, { [`annualDestinies.${currentYear}`]: annual }, { merge: true });
     });
     return result;
 });

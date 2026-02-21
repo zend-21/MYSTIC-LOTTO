@@ -7,42 +7,149 @@ interface AnnualReportModalProps {
   onClose: () => void;
 }
 
+const Section: React.FC<{ title: string; sub?: string; children: React.ReactNode; accent?: string; titleClass?: string }> = ({ title, sub, children, accent = 'amber', titleClass = '' }) => (
+  <div className={`p-5 md:p-10 bg-slate-900/70 rounded-[3rem] border border-white/5 space-y-6 flex flex-col items-center`}>
+    <div className="flex flex-col items-center gap-2 md:gap-3 w-full">
+      {sub && <p className={`text-[10px] font-black uppercase tracking-[0.6em] text-${accent}-500/60`}>{sub}</p>}
+      <h3 className={`text-xl md:text-2xl font-mystic font-black text-${accent}-400 tracking-widest ${titleClass}`}>{title}</h3>
+    </div>
+    {children}
+  </div>
+);
+
+const BodyText: React.FC<{ text: string }> = ({ text }) => (
+  <p className="text-sm md:text-base text-slate-300/80 leading-[2.2] whitespace-pre-wrap">{text}</p>
+);
+
 const AnnualReportModal: React.FC<AnnualReportModalProps> = ({ destiny, displayName, onClose }) => {
   return (
-    <div className="fixed inset-0 z-[9000] flex items-start justify-center p-4 sm:p-8 bg-black/95 backdrop-blur-3xl animate-in fade-in duration-500 overflow-y-auto custom-scroll">
-      <div className="glass p-8 sm:p-20 rounded-[4rem] border border-amber-500/40 w-full max-w-6xl shadow-[0_0_200px_rgba(251,191,36,0.3)] space-y-20 relative my-10 bg-slate-950/40">
-        <button onClick={onClose} className="absolute top-10 right-10 text-slate-500 hover:text-white transition-colors text-4xl z-[9001]">✕</button>
-        <div className="text-center space-y-8 pb-10 border-b border-white/5">
-          <div className="inline-flex items-center space-x-4 px-10 py-3 bg-amber-500/10 border border-amber-500/30 rounded-full">
-            <span className="w-3 h-3 bg-amber-500 rounded-full animate-pulse"></span>
-            <span className="text-sm font-black text-amber-500 uppercase tracking-[0.8em] ml-2">Premium Eternal Revelation</span>
+    <div className="fixed inset-0 z-[9000] flex items-start justify-center p-3 sm:p-8 bg-black/95 backdrop-blur-3xl animate-in fade-in duration-500 overflow-y-auto custom-scroll">
+      <div className="glass rounded-[3rem] border border-amber-500/30 w-full max-w-3xl shadow-[0_0_200px_rgba(251,191,36,0.2)] space-y-8 relative my-6 bg-slate-950/60 overflow-hidden">
+
+        {/* 닫기 버튼 */}
+        <button onClick={onClose} className="absolute top-6 right-6 w-10 h-10 rounded-full bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 transition-all flex items-center justify-center text-lg z-10">✕</button>
+
+        {/* 헤더 */}
+        <div className="text-center space-y-5 px-3 sm:px-8 pt-14 pb-10 border-b border-white/5">
+          <div className="inline-flex items-center space-x-3 px-6 sm:px-6 py-2 bg-amber-500/10 border border-amber-500/30 rounded-full w-full sm:w-auto justify-center sm:justify-start">
+            <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse shrink-0"></span>
+            <span className="text-[10px] font-black text-amber-500 uppercase tracking-[0.4em] sm:tracking-[0.6em] whitespace-nowrap">Premium Eternal Revelation</span>
           </div>
-          <h2 className="text-6xl md:text-8xl font-mystic font-black text-transparent bg-clip-text bg-gradient-to-b from-white via-amber-200 to-amber-600 tracking-tight uppercase leading-tight pt-6 drop-shadow-glow">천명 대운 정밀 리포트</h2>
-          <p className="text-slate-400 text-xl font-black tracking-[0.6em] uppercase">{displayName} 님의 {destiny.year}년 영적 동기화 완료</p>
+          <h2 className="text-[2rem] sm:text-4xl md:text-5xl font-mystic font-black text-transparent bg-clip-text bg-gradient-to-b from-white via-amber-200 to-amber-600 leading-tight pt-2">천명 대운 정밀 리포트</h2>
+          <p className="text-slate-400 text-sm font-black tracking-[0.12em] sm:tracking-[0.25em] uppercase whitespace-nowrap">{displayName} 님의 {destiny.year}년 영적 동기화 완료</p>
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-          <div className="p-12 bg-gradient-to-br from-amber-500/10 via-slate-900/50 to-transparent rounded-[4rem] border border-amber-500/30 shadow-2xl space-y-10 flex flex-col items-center justify-center">
-            <h3 className="text-amber-500 font-black text-sm uppercase tracking-widest mb-4">올해의 수호 천명수</h3>
-            <div className="flex wrap justify-center gap-8">
+
+        <div className="px-3 md:px-6 space-y-6 pb-14">
+
+          {/* 수호 천명수 */}
+          <Section title="수호 천명수" sub="Sacred Lucky Numbers" titleClass="translate-y-[10px] md:translate-y-[15px] inline-block">
+            <div className="flex flex-wrap justify-center gap-3 sm:gap-5 py-2">
               {destiny.numbers.map((num, i) => (
-                <div key={i} className="w-24 h-24 rounded-full bg-gradient-to-br from-amber-100 via-amber-500 to-amber-900 flex items-center justify-center text-slate-950 font-black text-4xl shadow-[0_15px_40px_rgba(251,191,36,0.5)] border-t-4 border-white/40">{num}</div>
+                <div key={i} className="w-14 h-14 sm:w-20 sm:h-20 rounded-full bg-gradient-to-br from-amber-100 via-amber-500 to-amber-900 flex items-center justify-center text-slate-950 font-black text-2xl sm:text-3xl shadow-[0_10px_30px_rgba(251,191,36,0.5)] border-t-4 border-white/40">{num}</div>
               ))}
             </div>
-          </div>
-          <div className="p-12 bg-black/50 rounded-[4rem] border border-white/5 flex flex-col items-center justify-center space-y-8">
-            <h3 className="text-slate-500 font-black text-xs uppercase tracking-widest">올해의 기운 보강 색상</h3>
-            <div className="flex flex-col items-center space-y-6">
-              <div className="w-24 h-24 rounded-3xl shadow-2xl border-4 border-white/10" style={{ backgroundColor: destiny.luckyColor || '#fff' }}></div>
-              <p className="text-2xl font-black text-white">{destiny.luckyColor}</p>
+            {destiny.numberExplanations && destiny.numberExplanations.length > 0 && (
+              <div className="space-y-5 mt-4">
+                {destiny.numberExplanations.map((ne, i) => (
+                  <div key={i} className="flex flex-col gap-3 p-5 bg-black/30 rounded-2xl border border-amber-500/10">
+                    <div className="w-10 h-10 rounded-full bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 font-black text-sm">{ne.number}</div>
+                    <p className="text-sm text-slate-300/75 leading-relaxed">{ne.explanation}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Section>
+
+          {/* 행운 색상 */}
+          <Section title="올해의 기운 보강 색상" sub="Lucky Color">
+            <div className="flex items-center gap-6">
+              <div className="w-16 h-16 rounded-2xl shadow-xl border-2 border-white/15 shrink-0" style={{ backgroundColor: destiny.luckyColor || '#888' }}></div>
+              <p className="text-base font-bold text-white">{destiny.luckyColor}</p>
             </div>
+            {destiny.luckyColorDescription && (
+              <BodyText text={destiny.luckyColorDescription} />
+            )}
+          </Section>
+
+          {/* 대운 흐름 */}
+          <Section title="올해 대운의 흐름" sub="Annual Destiny Synopsis">
+            <BodyText text={destiny.reason} />
+          </Section>
+
+          {/* 전반기/후반기 전략 */}
+          {destiny.planningStrategy && (
+            <Section title="운을 극대화하는 올해의 전략" sub="Planning Strategy">
+              <BodyText text={destiny.planningStrategy} />
+            </Section>
+          )}
+
+          {/* 길월 / 흉월 */}
+          {(destiny.bestMonths || destiny.worstMonths) && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {destiny.bestMonths && (
+                <div className="p-8 bg-emerald-950/40 rounded-[2.5rem] border border-emerald-500/20 space-y-3">
+                  <p className="text-[10px] font-black text-emerald-400/70 uppercase tracking-[0.5em]">Best Months</p>
+                  <h4 className="text-base font-mystic font-black text-emerald-300">최길월 ✦</h4>
+                  <p className="text-sm text-slate-300/75 leading-relaxed">{destiny.bestMonths}</p>
+                </div>
+              )}
+              {destiny.worstMonths && (
+                <div className="p-8 bg-rose-950/40 rounded-[2.5rem] border border-rose-500/20 space-y-3">
+                  <p className="text-[10px] font-black text-rose-400/70 uppercase tracking-[0.5em]">Caution Months</p>
+                  <h4 className="text-base font-mystic font-black text-rose-300">신중월 ⚠</h4>
+                  <p className="text-sm text-slate-300/75 leading-relaxed">{destiny.worstMonths}</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 재물운 */}
+          {destiny.wealthDetailed && (
+            <Section title="재물 & 사업운" sub="Wealth Fortune" accent="yellow">
+              <BodyText text={destiny.wealthDetailed} />
+            </Section>
+          )}
+
+          {/* 애정운 */}
+          {destiny.loveDetailed && (
+            <Section title="애정 & 인연운" sub="Love Fortune" accent="rose">
+              <BodyText text={destiny.loveDetailed} />
+            </Section>
+          )}
+
+          {/* 건강운 */}
+          {destiny.healthDetailed && (
+            <Section title="건강 & 신체운" sub="Health Fortune" accent="emerald">
+              <BodyText text={destiny.healthDetailed} />
+            </Section>
+          )}
+
+          {/* 타로 */}
+          {destiny.tarotDetailed && (
+            <Section title={destiny.tarotCardName ? `타로 — ${destiny.tarotCardName}` : '타로 대운 계시'} sub="Tarot Revelation">
+              <BodyText text={destiny.tarotDetailed} />
+            </Section>
+          )}
+
+          {/* 점성술 */}
+          {destiny.astrologyDetailed && (
+            <Section title="점성술 연간 트랜짓" sub="Astrology Annual Transit">
+              <BodyText text={destiny.astrologyDetailed} />
+            </Section>
+          )}
+
+          {/* 사주 심층 분석 */}
+          {destiny.sajuDeepDive && (
+            <Section title="사주 심층 분석" sub="Saju Deep Dive">
+              <BodyText text={destiny.sajuDeepDive} />
+            </Section>
+          )}
+
+          {/* 닫기 버튼 */}
+          <div className="flex justify-center pt-6">
+            <button onClick={onClose} className="px-16 py-5 bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 font-black rounded-[2rem] uppercase tracking-[0.3em] text-sm transition-all">닫기</button>
           </div>
-        </div>
-        <div className="p-14 bg-slate-900/80 rounded-[5rem] border border-white/10 shadow-2xl relative overflow-hidden group">
-          <h3 className="text-amber-400 font-mystic font-black text-3xl mb-12 uppercase tracking-widest">ANNUAL DESTINY SYNOPSIS</h3>
-          <p className="text-xl text-indigo-50/90 leading-[2.6] italic whitespace-pre-wrap first-letter:text-9xl first-letter:font-mystic first-letter:mr-8 first-letter:float-left first-letter:text-amber-500 first-letter:leading-none">{destiny.reason}</p>
-        </div>
-        <div className="flex justify-center pt-10">
-          <button onClick={onClose} className="px-32 py-10 bg-gradient-to-r from-amber-600 via-yellow-500 to-amber-700 text-slate-950 font-black rounded-[3rem] shadow-2xl uppercase tracking-[0.5em] text-2xl border-t-4 border-white/40 hover:scale-105 transition-all">천상 계시 기록 보존</button>
+
         </div>
       </div>
     </div>

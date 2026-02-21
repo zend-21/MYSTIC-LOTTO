@@ -13,6 +13,7 @@ const Archives: React.FC<ArchivesProps> = ({ items, orb, onDelete }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [modalItem, setModalItem] = useState<SavedFortune | null>(null);
   const [showAnnualModal, setShowAnnualModal] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const filteredItems = items.filter(item => {
     if (activeTab === 'all') return true;
@@ -253,6 +254,26 @@ const Archives: React.FC<ArchivesProps> = ({ items, orb, onDelete }) => {
         </div>
       )}
 
+      {/* 삭제 확인 모달 */}
+      {confirmDeleteId && (
+        <div className="fixed inset-0 z-[9500] flex items-center justify-center px-6" onClick={() => setConfirmDeleteId(null)}>
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" />
+          <div className="relative glass p-10 rounded-[3rem] border border-rose-500/30 w-full max-w-sm space-y-8 shadow-[0_0_80px_rgba(239,68,68,0.15)]" onClick={e => e.stopPropagation()}>
+            <div className="text-center space-y-3">
+              <div className="w-14 h-14 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mx-auto">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgb(239,68,68)" strokeWidth="2.5"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+              </div>
+              <h3 className="text-lg font-black text-white tracking-wider">기록 삭제</h3>
+              <p className="text-sm text-slate-400 leading-relaxed">이 운명 기록을 서고에서 영구 삭제합니다.<br/><span className="text-rose-400 font-bold">삭제된 기록은 복구할 수 없습니다.</span></p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmDeleteId(null)} className="flex-1 py-4 bg-white/5 border border-white/10 rounded-2xl text-slate-300 font-black text-sm hover:bg-white/10 transition-all">취소</button>
+              <button onClick={() => { onDelete(confirmDeleteId); setConfirmDeleteId(null); }} className="flex-1 py-4 bg-rose-600/80 border border-rose-500/50 rounded-2xl text-white font-black text-sm hover:bg-rose-500 transition-all">삭제</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {renderInventory()}
       {renderJewelryBox()}
 
@@ -293,7 +314,7 @@ const Archives: React.FC<ArchivesProps> = ({ items, orb, onDelete }) => {
                        </div>
                     </div>
                     <div className="flex items-center space-x-4">
-                       <button onClick={(e) => { e.stopPropagation(); onDelete(item.id); }} className="w-10 h-10 rounded-xl bg-red-500/5 text-red-500/20 hover:text-red-500 transition-all flex items-center justify-center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button>
+                       <button onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(item.id); }} className="w-10 h-10 rounded-xl bg-red-500/5 text-red-500/20 hover:text-red-500 transition-all flex items-center justify-center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button>
                     </div>
                   </div>
                   {isExpanded && (

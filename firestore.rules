@@ -36,6 +36,11 @@ service cloud.firestore {
         allow read, delete: if isLoggedIn() && request.auth.uid == userId;
         allow update: if false;
       }
+
+      // 개인 설정 (매크로 등): 본인만 읽기/쓰기
+      match /settings/{docId} {
+        allow read, write: if isLoggedIn() && request.auth.uid == userId;
+      }
     }
 
     // ── 전역 로또 히스토리 ─────────────────────────────────────────
@@ -105,6 +110,12 @@ service cloud.firestore {
         allow delete: if isLoggedIn()
                       && resource.data.userId == request.auth.uid;
       }
+    }
+
+    // ── 신고: reports/{reportId} ───────────────────────────────────
+    match /reports/{reportId} {
+      allow create: if isLoggedIn();
+      allow read, write: if isAdmin();
     }
 
     // ── 게시판: square/board/posts/{postId} ────────────────────────

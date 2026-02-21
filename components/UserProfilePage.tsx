@@ -62,6 +62,7 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [archiveCategory, setArchiveCategory] = useState<'all' | 'divine' | 'annual' | 'scientific'>('all');
   const [selectedArchive, setSelectedArchive] = useState<SavedFortune | null>(null);
+  const [confirmDeleteArchiveId, setConfirmDeleteArchiveId] = useState<string | null>(null);
   const [chatCaptures, setChatCaptures] = useState<ChatCapture[]>([]);
   const [expandedCapture, setExpandedCapture] = useState<string | null>(null);
   const [deletingCapture, setDeletingCapture] = useState<string | null>(null);
@@ -349,15 +350,35 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
     <div className="fixed inset-0 z-[5000] bg-[#020617] text-slate-200 flex flex-col animate-in fade-in duration-700">
       {showTermsModal && <LegalModal title="이용약관" subtitle="Terms of Service" onClose={() => setShowTermsModal(false)}><TermsContent /></LegalModal>}
       {showPrivacyModal && <LegalModal title="개인정보처리방침" subtitle="Privacy Policy" onClose={() => setShowPrivacyModal(false)}><PrivacyContent /></LegalModal>}
+
+      {/* 서고 기록 삭제 확인 모달 */}
+      {confirmDeleteArchiveId && (
+        <div className="fixed inset-0 z-[9500] flex items-center justify-center px-6" onClick={() => setConfirmDeleteArchiveId(null)}>
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" />
+          <div className="relative glass p-10 rounded-[3rem] border border-rose-500/30 w-full max-w-sm space-y-8 shadow-[0_0_80px_rgba(239,68,68,0.15)]" onClick={e => e.stopPropagation()}>
+            <div className="text-center space-y-3">
+              <div className="w-14 h-14 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mx-auto">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgb(239,68,68)" strokeWidth="2.5"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+              </div>
+              <h3 className="text-lg font-black text-white tracking-wider">기록 삭제</h3>
+              <p className="text-sm text-slate-400 leading-relaxed">이 운명 기록을 서고에서 영구 삭제합니다.<br/><span className="text-rose-400 font-bold">삭제된 기록은 복구할 수 없습니다.</span></p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmDeleteArchiveId(null)} className="flex-1 py-4 bg-white/5 border border-white/10 rounded-2xl text-slate-300 font-black text-sm hover:bg-white/10 transition-all">취소</button>
+              <button onClick={() => { onDeleteArchive(confirmDeleteArchiveId); setSelectedArchive(null); setConfirmDeleteArchiveId(null); }} className="flex-1 py-4 bg-rose-600/80 border border-rose-500/50 rounded-2xl text-white font-black text-sm hover:bg-rose-500 transition-all">삭제</button>
+            </div>
+          </div>
+        </div>
+      )}
       <header className="relative z-10 border-b border-white/5 px-8 py-6 flex justify-between items-center shrink-0">
         <div className="absolute inset-0 bg-white/[0.02] backdrop-blur-3xl -z-10 pointer-events-none" />
-        <div className="flex items-center space-x-6">
-          <button onClick={onBack} className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors">
+        <div className="flex items-center space-x-3 sm:space-x-6">
+          <button onClick={onBack} className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors shrink-0">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           </button>
           <div>
-            <h2 className="text-xl font-mystic font-black text-white tracking-widest leading-none uppercase">Private Sanctum</h2>
-            <p className="text-[9px] text-indigo-400 font-black uppercase tracking-[0.4em] mt-1.5 inline-flex items-center gap-1.5">
+            <h2 className="text-base sm:text-xl font-mystic font-black text-white tracking-widest leading-none uppercase">Private Sanctum</h2>
+            <p className="text-[9px] text-indigo-400 font-black uppercase tracking-[0.4em] mt-0.5 sm:mt-1.5 inline-flex items-center gap-1.5">
               {orb.nickname || profile.name} 님의 전용 영역
               {(orb.mailbox?.some(m => !m.isRead) || (isAdmin && hasNewReports)) && (
                 <span className="inline-block w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
@@ -365,17 +386,25 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
             </p>
           </div>
         </div>
-        <div className="flex items-center space-x-4">
-           <div className="text-right">
-              <p className="text-[9px] text-slate-500 font-black uppercase">Resonance Level</p>
-              <p className="text-sm font-mystic font-black text-white">LV.{orb.level}</p>
+        <div className="flex items-center space-x-3">
+           <div className="text-right sm:self-auto self-end pb-0.5">
+              <p className="hidden sm:block text-[9px] text-slate-500 font-black uppercase">Resonance Level</p>
+              <p className="text-xs font-normal sm:text-sm sm:font-mystic sm:font-black text-white/80 sm:text-white">LV.{orb.level}</p>
            </div>
            <OrbVisual level={orb.level} className="w-10 h-10 border border-white/10 shadow-lg shadow-indigo-500/10" overlayAnimation={(ORB_DECORATIONS.find(d => d.id === orb.activeDecorationId) || ORB_DECORATIONS[0]).overlayAnimation} />
         </div>
       </header>
 
-      <div className="flex-1 overflow-hidden flex">
-        <aside className={`${sidebarOpen ? 'w-52' : 'w-14'} transition-all duration-300 border-r border-white/5 glass flex flex-col pt-4 pb-6 space-y-1 shrink-0`}>
+      <div className="flex-1 overflow-hidden flex relative">
+        {/* 모바일 백드롭: 사이드바 열렸을 때만 */}
+        {sidebarOpen && (
+          <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setSidebarOpen(false)} />
+        )}
+        <aside className={`
+          relative z-50
+          ${sidebarOpen ? 'w-52 -mr-[152px]' : 'w-14'}
+          transition-all duration-300 border-r border-white/5 glass flex flex-col pt-4 pb-6 space-y-1 shrink-0
+        `}>
            {/* 토글 버튼 */}
            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="self-end mr-3 mb-3 w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-500 hover:text-white transition-all shrink-0">
              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -394,7 +423,7 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
              ].map(tab => (
                <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => { setActiveTab(tab.id as any); if (window.innerWidth < 640) setSidebarOpen(false); }}
                 className={`w-full py-4 flex items-center transition-all group ${sidebarOpen ? 'px-6 space-x-4' : 'justify-center'} ${activeTab === tab.id ? 'bg-indigo-600/10 border-r-2 border-indigo-500' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
                >
                  <span className="relative text-xl shrink-0">
@@ -414,7 +443,7 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
            })()}
            {isAdmin && (
              <button
-               onClick={() => setActiveTab('admin')}
+               onClick={() => { setActiveTab('admin'); if (window.innerWidth < 640) setSidebarOpen(false); }}
                className={`w-full py-4 flex items-center transition-all ${sidebarOpen ? 'px-6 space-x-4' : 'justify-center'} ${activeTab === 'admin' ? 'bg-amber-500/10 border-r-2 border-amber-400' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
              >
                <span className="text-xl shrink-0">👑</span>
@@ -427,13 +456,13 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
              </button>
            )}
            <div className="flex-1"></div>
-           <button onClick={() => setShowWithdrawConfirm(true)} className={`w-full py-5 flex items-center opacity-20 hover:opacity-100 hover:bg-rose-900/20 transition-all text-rose-500 ${sidebarOpen ? 'px-6 space-x-3' : 'justify-center'}`}>
+           <button onClick={() => setShowWithdrawConfirm(true)} className={`w-full py-5 flex items-center opacity-50 sm:opacity-20 hover:opacity-100 hover:bg-rose-900/20 transition-all text-rose-500 ${sidebarOpen ? 'px-6 space-x-3' : 'justify-center'}`}>
              <span className="text-sm shrink-0">🚪</span>
              {sidebarOpen && <span className="text-[10px] font-black uppercase tracking-widest">Withdrawal</span>}
            </button>
         </aside>
 
-        <main className="flex-1 overflow-y-auto p-6 md:p-12 custom-scroll bg-[radial-gradient(circle_at_50%_0%,_rgba(30,58,138,0.1),_transparent_70%)]">
+        <main className="flex-1 overflow-y-auto px-[14px] py-6 sm:p-6 md:p-12 custom-scroll bg-[radial-gradient(circle_at_50%_0%,_rgba(30,58,138,0.1),_transparent_70%)]">
            <div className="max-w-4xl mx-auto space-y-12 pb-24">
               
               {activeTab === 'identity' && (
@@ -488,9 +517,10 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                            <button 
                             onClick={checkNickname}
                             disabled={!editNickname || editNickname === (orb.nickname || '')}
-                            className="px-8 bg-slate-800 text-white text-[10px] font-black rounded-2xl uppercase tracking-widest hover:bg-slate-700 disabled:opacity-30 transition-all"
+                            className="px-4 sm:px-8 py-2 sm:py-0 bg-slate-800 text-white text-[9px] sm:text-[10px] font-black rounded-xl sm:rounded-2xl uppercase tracking-tight sm:tracking-widest hover:bg-slate-700 disabled:opacity-30 transition-all shrink-0"
                            >
-                            중복 체크
+                            <span className="sm:hidden">중복체크</span>
+                            <span className="hidden sm:inline">중복 체크</span>
                            </button>
                         </div>
                         {isNickValid === true && <p className="text-[9px] text-emerald-400 font-bold px-1 uppercase tracking-widest">사용 가능한 신성한 칭호입니다.</p>}
@@ -620,9 +650,10 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                       <div className="pt-6">
                          <button 
                           onClick={handleSaveIdentity} 
-                          className="w-full py-6 bg-indigo-600 text-white font-black rounded-2xl shadow-2xl hover:bg-indigo-500 transition-all uppercase tracking-[0.2em] text-sm border-t border-white/20"
+                          className="w-full py-3 sm:py-6 bg-indigo-600 text-white font-black rounded-2xl shadow-2xl hover:bg-indigo-500 transition-all uppercase tracking-[0.2em] text-xs sm:text-sm border-t border-white/20"
                          >
-                          운명 기록 최종 갱신 (Save Records)
+                          <span className="sm:hidden">운명 기록 최종 갱신<br />(Save Records)</span>
+                          <span className="hidden sm:inline">운명 기록 최종 갱신 (Save Records)</span>
                          </button>
                       </div>
                    </div>
@@ -746,7 +777,7 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                 const typeBg: Record<string, string> = { divine: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30', annual: 'bg-amber-500/20 text-amber-300 border-amber-500/30', scientific: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' };
                 const getMiniNums = (a: SavedFortune): number[] => {
                   const d = a.data as any;
-                  return (d.luckyNumbers || d.numbers || []).slice(0, 3);
+                  return (d.luckyNumbers || d.numbers || []);
                 };
                 const getCoreNums = (a: SavedFortune): number[] => {
                   const d = a.data as any;
@@ -755,10 +786,10 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                 return (
                   <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
                     {/* 카테고리 필터 */}
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex gap-2 overflow-x-auto no-scrollbar pb-0.5">
                       {(['all', 'divine', 'annual', 'scientific'] as const).map(cat => (
                         <button key={cat} onClick={() => setArchiveCategory(cat)}
-                          className={`px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all border ${archiveCategory === cat ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-white/5 text-slate-500 border-white/10 hover:text-slate-300'}`}>
+                          className={`px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all border shrink-0 ${archiveCategory === cat ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-white/5 text-slate-500 border-white/10 hover:text-slate-300'}`}>
                           {cat === 'all' ? '전체' : typeLabel[cat]}
                         </button>
                       ))}
@@ -777,15 +808,21 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                           return (
                             <div key={item.id} onClick={() => setSelectedArchive(item)}
                               className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-white/5 border border-white/5 hover:bg-white/10 transition-all cursor-pointer group">
-                              <span className={`text-[10px] font-black px-2 py-1 rounded-lg border shrink-0 ${typeBg[item.type]}`}>{typeLabel[item.type]}</span>
-                              <span className="text-[11px] text-slate-500 font-bold shrink-0">{dateStr}</span>
-                              <div className="flex gap-1 flex-1">
-                                {miniNums.map((n, i) => (
-                                  <div key={i} className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black shadow ${coreNums.includes(n) ? 'bg-gradient-to-br from-amber-300 to-amber-600 text-slate-950' : 'bg-slate-700 text-white'}`}>{n}</div>
-                                ))}
+                              {/* 왼쪽: 모바일 2줄 / PC 1줄 */}
+                              <div className="flex-1 flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3 min-w-0">
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <span className={`text-[10px] font-black px-2 py-1 rounded-lg border shrink-0 ${typeBg[item.type]}`}>{typeLabel[item.type]}</span>
+                                  <span className="text-[11px] text-slate-500 font-bold shrink-0">{dateStr}</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  {miniNums.map((n, i) => (
+                                    <div key={i} className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black shadow ${coreNums.includes(n) ? 'bg-gradient-to-br from-amber-300 to-amber-600 text-slate-950' : 'bg-slate-700 text-white'}`}>{n}</div>
+                                  ))}
+                                </div>
                               </div>
-                              <button onClick={e => { e.stopPropagation(); onDeleteArchive(item.id); }}
-                                className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-rose-400 transition-all text-lg shrink-0">🗑️</button>
+                              {/* 오른쪽: 삭제 버튼 — 항상 세로 중앙 */}
+                              <button onClick={e => { e.stopPropagation(); setConfirmDeleteArchiveId(item.id); }}
+                                className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-slate-500 hover:text-rose-400 transition-all text-base shrink-0">🗑️</button>
                             </div>
                           );
                         })}
@@ -1245,7 +1282,7 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
 
               {/* 삭제 / 닫기 */}
               <div className="flex gap-3 pt-2">
-                <button onClick={() => { onDeleteArchive(selectedArchive.id); setSelectedArchive(null); }}
+                <button onClick={() => setConfirmDeleteArchiveId(selectedArchive.id)}
                   className="flex-1 py-4 bg-rose-500/10 text-rose-400 border border-rose-500/20 font-black rounded-2xl text-xs uppercase tracking-widest hover:bg-rose-500/20 transition-all">삭제</button>
                 <button onClick={() => setSelectedArchive(null)}
                   className="flex-1 py-4 bg-white/5 text-slate-400 font-black rounded-2xl text-xs uppercase tracking-widest hover:bg-white/10 transition-all">닫기</button>

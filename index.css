@@ -10,6 +10,14 @@ body {
   overflow-x: hidden;
 }
 
+/* 불릿 hanging indent */
+.bullet-list > p {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4em;
+}
+.bullet-list > p > .bullet { flex-shrink: 0; }
+
 /* PC에서 앱을 640px 폰 사이즈로 중앙 정렬 */
 @media (min-width: 641px) {
   #root {

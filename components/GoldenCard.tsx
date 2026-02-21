@@ -1,18 +1,36 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+
+const NATURAL_W = 520;
+const NATURAL_H = Math.round(NATURAL_W / 1.58); // ≈ 329
 
 interface GoldenCardProps {
   ownerName: string;
   isVisible: boolean;
   cardId?: string;
   hasCard?: boolean;
+  onInfoClick?: () => void;
 }
 
-const GoldenCard: React.FC<GoldenCardProps> = ({ ownerName, isVisible, cardId, hasCard = true }) => {
+const GoldenCard: React.FC<GoldenCardProps> = ({ ownerName, isVisible, cardId, hasCard = true, onInfoClick }) => {
   const [rotate, setRotate] = useState({ x: 0, y: 0 });
   const [glare, setGlare] = useState({ x: 50, y: 50, opacity: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [cardScale, setCardScale] = useState(1);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      const w = entries[0]?.contentRect.width ?? el.offsetWidth;
+      setCardScale(Math.min(w / NATURAL_W, 1));
+    });
+    ro.observe(el);
+    setCardScale(Math.min(el.offsetWidth / NATURAL_W, 1));
+    return () => ro.disconnect();
+  }, []);
 
   if (!isVisible) return null;
 
@@ -47,23 +65,44 @@ const GoldenCard: React.FC<GoldenCardProps> = ({ ownerName, isVisible, cardId, h
   const displayName = hasCard ? ownerName : null;
 
   return (
-    <div className="relative group perspective-2500 select-none py-16 touch-none w-full flex justify-center items-center">
+    <div ref={containerRef} className="relative group select-none py-16 touch-none w-full flex justify-center items-center">
       {/* 초거대 후광 (Hyper Glow) */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[180%] h-[180%] pointer-events-none overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(255,215,0,0.15),_transparent_65%)] animate-pulse-slow"></div>
         <div className="absolute inset-0 bg-[conic-gradient(from_0deg,_transparent,_rgba(255,223,0,0.05),_transparent)] animate-spin-slow"></div>
       </div>
 
-      <div 
+      <div style={{ width: NATURAL_W * cardScale, height: NATURAL_H * cardScale, position: 'relative', flexShrink: 0 }}>
+        {onInfoClick && (
+          <button
+            onClick={onInfoClick}
+            style={{ position: 'absolute', top: -30, right: 0, zIndex: 100 }}
+            className="w-5 h-5 sm:w-6 sm:h-6 rounded-full border border-yellow-500/50 bg-yellow-500/15 text-yellow-400/70 text-[9px] sm:text-[10px] font-black flex items-center justify-center hover:bg-yellow-500/30 hover:text-yellow-300 transition-all shadow-lg translate-x-[-5px] sm:translate-x-0"
+          >?</button>
+        )}
+        {/* scale + perspective 분리 wrapper: scale만 담당하고 perspective를 cardRef에 직접 전달 */}
+        <div style={{
+          width: NATURAL_W,
+          height: NATURAL_H,
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          transform: `scale(${cardScale})`,
+          transformOrigin: 'top left',
+          perspective: '2500px',
+        }}>
+      <div
         ref={cardRef}
         onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUpOrLeave} onMouseLeave={onMouseUpOrLeave}
         onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
-        style={{ 
+        style={{
+          width: '100%',
+          height: '100%',
           transform: `rotateX(${rotate.x}deg) rotateY(${rotate.y}deg)`,
           transition: isDragging ? 'none' : 'transform 1s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.5s',
           cursor: isDragging ? 'grabbing' : 'grab'
         }}
-        className="relative w-full max-w-[520px] aspect-[1.58/1] rounded-[3rem] preserve-3d shadow-[0_50px_100px_-20px_rgba(0,0,0,1)] border border-yellow-400/30 overflow-hidden ring-1 ring-white/10"
+        className="rounded-[3rem] preserve-3d shadow-[0_50px_100px_-20px_rgba(0,0,0,1)] border border-yellow-400/30 overflow-hidden ring-1 ring-white/10"
       >
         {/* 카드 본체 레이어 */}
         <div className="absolute inset-0 rounded-[3rem] overflow-hidden backface-hidden bg-[#0d0a00]">
@@ -121,7 +160,7 @@ const GoldenCard: React.FC<GoldenCardProps> = ({ ownerName, isVisible, cardId, h
 
               {/* 홀로그램 엠블럼 */}
               <div className="translate-z-150 rotate-y-20 group-hover:rotate-0 transition-transform duration-1000" style={{ marginRight: '7px', marginTop: '13px' }}>
-                <div className="w-16 h-16 md:w-20 md:h-20 rounded-[1.5rem] border-2 border-yellow-100/60 bg-gradient-to-br from-white via-amber-400 to-amber-950 flex items-center justify-center shadow-[0_20px_50px_rgba(0,0,0,0.8)] border-b-[8px] border-r-[8px] border-amber-950/70 overflow-hidden">
+                <div className="w-16 h-16 rounded-[1.5rem] border-2 border-yellow-100/60 bg-gradient-to-br from-white via-amber-400 to-amber-950 flex items-center justify-center shadow-[0_20px_50px_rgba(0,0,0,0.8)] border-b-[8px] border-r-[8px] border-amber-950/70 overflow-hidden">
                    <div className="absolute inset-0 bg-[conic-gradient(from_0deg,#fff,#fbbf24,#fff)] opacity-20 animate-spin-slow"></div>
                    <svg viewBox="0 0 24 24" className="w-8 h-8 md:w-11 md:h-11 text-[#3d2700] drop-shadow-[2px_2px_0px_rgba(255,255,255,0.5)] z-10" fill="currentColor">
                       <path d="M12,2L14.5,9L22,10L14.5,11L12,18L9.5,11L2,10L9.5,9L12,2" />
@@ -157,6 +196,8 @@ const GoldenCard: React.FC<GoldenCardProps> = ({ ownerName, isVisible, cardId, h
         
         {/* 상단 레이어 광택 효과 */}
         <div className="absolute inset-0 rounded-[3rem] bg-gradient-to-tr from-white/10 to-transparent opacity-40 pointer-events-none z-50"></div>
+      </div>
+        </div>
       </div>
 
       <style>{`

@@ -6,7 +6,9 @@ const ADMIN_LEVEL = 300;
 const SUB_ADMIN_LEVEL = 200;
 const ADMIN_INFINITE_POINTS = 999999999; // ∞ 표시 기준값
 // 포인트 표시 헬퍼
-const displayPoints = (pts: number) => pts >= ADMIN_INFINITE_POINTS ? '∞' : pts.toLocaleString();
+const displayPoints = (pts: number) => pts == null ? '0' : pts >= ADMIN_INFINITE_POINTS ? '∞' : pts.toLocaleString();
+// 약관 버전 — 개정 시 이 값을 올리면 모든 유저에게 강제 재동의 요청
+const CURRENT_TERMS_VERSION = '1.0';
 
 // KST(UTC+9) 기준 날짜 문자열 반환 (YYYY-MM-DD)
 // new Date().toISOString()은 UTC 기준이라 자정~오전9시 사이에 날짜가 안 바뀌는 버그 방지
@@ -60,9 +62,10 @@ const App: React.FC = () => {
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [showGoldenCardInfo, setShowGoldenCardInfo] = useState(false);
-  // 로그인 화면 동의 체크박스
-  const [loginAgreedTerms, setLoginAgreedTerms] = useState(false);
-  const [loginAgreedPrivacy, setLoginAgreedPrivacy] = useState(false);
+  const [showGoldenCardConfirm, setShowGoldenCardConfirm] = useState(false);
+  // 로그인 화면 동의 체크박스 (localStorage로 기억)
+  const [loginAgreedTerms, setLoginAgreedTerms] = useState(() => localStorage.getItem('agreedTerms') === 'true');
+  const [loginAgreedPrivacy, setLoginAgreedPrivacy] = useState(() => localStorage.getItem('agreedPrivacy') === 'true');
   // 기존 유저 약관 동의 오버레이 체크박스
   const [overlayAgreedTerms, setOverlayAgreedTerms] = useState(false);
   const [overlayAgreedPrivacy, setOverlayAgreedPrivacy] = useState(false);
@@ -96,6 +99,7 @@ const App: React.FC = () => {
   const [offeringData, setOfferingData] = useState<{amount: number, multiplier: number} | null>(null);
   const [isOfferingLoading, setIsOfferingLoading] = useState(false);
   const [lumenReceivedAt, setLumenReceivedAt] = useState(0);
+  const [lumenSenderName, setLumenSenderName] = useState('');
 
   const [orb, setOrb] = useState<OrbState>({
     level: 1,
@@ -205,9 +209,9 @@ const App: React.FC = () => {
             // New user initialization
             setDoc(userDocRef, { orb: { ...orb, points: INITIAL_POINTS } }, { merge: true });
           }
-          // 약관 동의 여부 — 스냅샷 데이터에서 직접 확인
+          // 약관 동의 여부 — 버전까지 일치해야 동의 완료로 인정
           if (snap.exists()) {
-            setTermsAccepted(!!(snap.data().termsAcceptedAt));
+            setTermsAccepted(snap.data().termsVersion === CURRENT_TERMS_VERSION);
           } else {
             // 신규 유저: 로그인 화면에서 동의 완료
             setTermsAccepted(true);
@@ -224,6 +228,7 @@ const App: React.FC = () => {
           if (snap.empty) return;
           let totalGift = 0;
           let totalExp = 0;
+          let lastGiftSenderName = '';
           const batch = writeBatch(db);
           snap.docs.forEach(d => {
             const data = d.data();
@@ -231,6 +236,7 @@ const App: React.FC = () => {
               totalExp += (data.amount || 0);
             } else {
               totalGift += (data.amount || 0);
+              lastGiftSenderName = data.fromName || '';
               batch.update(userDocRef, {
                 "orb.giftHistory": arrayUnion({
                   id: d.id,
@@ -249,6 +255,7 @@ const App: React.FC = () => {
           await batch.commit().catch(() => {});
           if (totalGift > 0) {
             setToast(`${totalGift.toLocaleString()} 루멘을 선물받았습니다! ✨`);
+            setLumenSenderName(lastGiftSenderName);
             setLumenReceivedAt(Date.now());
           }
           if (totalExp > 0) {
@@ -355,11 +362,13 @@ const App: React.FC = () => {
       isInitialMount.current = false;
       return;
     }
-    if (currentUser) {
+    if (currentUser && profile) {
       const timer = setTimeout(async () => {
         // points, giftHistory는 서버/arrayUnion으로 관리 — auto-sync에서 제외
         const { points: _points, giftHistory: _giftHistory, ...orbCore } = orb;
-        await setDoc(doc(db, "users", currentUser.uid), { profile, orb: orbCore }, { merge: true });
+        // mergeFields로 orb 맵 전체 교체 방지 — orb.points가 Firestore에서 지워지지 않도록
+        const mergeFields = ['profile', ...Object.keys(orbCore).map(k => `orb.${k}`)];
+        await setDoc(doc(db, "users", currentUser.uid), { profile, orb: orbCore }, { mergeFields });
       }, 500); // Debounce sync
       return () => clearTimeout(timer);
     }
@@ -406,10 +415,12 @@ const App: React.FC = () => {
   const handleGoogleLogin = async () => {
     const user = await loginWithGoogle();
     if (user) {
-      // 로그인 화면에서 약관 동의 후 진행했으므로 동의 시각 저장
+      // termsAcceptedAt: 매 동의 시마다 갱신 / termsVersion: 동의한 약관 버전
+      // firstTermsAcceptedAt: 최초 1회만 기록 — 신규 유저(catch)에서만 설정
       const userDocRef = doc(db, "users", user.uid);
-      updateDoc(userDocRef, { termsAcceptedAt: Date.now() }).catch(() =>
-        setDoc(userDocRef, { termsAcceptedAt: Date.now() }, { merge: true })
+      const now = Date.now();
+      updateDoc(userDocRef, { termsAcceptedAt: now, termsVersion: CURRENT_TERMS_VERSION }).catch(() =>
+        setDoc(userDocRef, { termsAcceptedAt: now, firstTermsAcceptedAt: now, termsVersion: CURRENT_TERMS_VERSION }, { merge: true })
       );
       setTermsAccepted(true);
     }
@@ -511,7 +522,7 @@ const App: React.FC = () => {
       // dailyExtractCount만 클라이언트 상태로 갱신 (UX 목적)
       setOrb(prev => ({ ...prev, dailyExtractCount: prev.dailyExtractCount + 1 }));
       growOrb(30);
-      onToast("오늘의 천기가 기록되었습니다.");
+      onToast("신성한 천기 리포트가 서고에 자동 저장되었습니다.");
     } catch (err: any) {
       const msg = err?.message?.includes("루멘이 부족")
         ? "루멘이 부족합니다."
@@ -546,7 +557,7 @@ const App: React.FC = () => {
       }
       await saveToArchive('scientific', res);
       growOrb(30);
-      onToast("지성 분석 리포트가 도출되었습니다.");
+      onToast("지성 분석 리포트가 서고에 자동 저장되었습니다.");
     } catch (err: any) {
       const msg = err?.message?.includes("루멘이 부족")
         ? "루멘이 부족합니다."
@@ -595,6 +606,7 @@ const App: React.FC = () => {
         year: currentYear,
         numbers: res.luckyNumbers,
         luckyColor: res.luckyColor,
+        luckyColorDescription: res.luckyColorDescription,
         reason: res.destinyDescription,
         planningStrategy: res.planningStrategy,
         bestMonths: res.bestMonths,
@@ -616,7 +628,7 @@ const App: React.FC = () => {
       growOrb(2000);
       await saveToArchive('annual', annual);
       setIsRitualUnlocked(false);
-      onToast(`${currentYear}년 대운 분석이 완료되어 서고에 영구 보존되었습니다.`);
+      onToast(`${currentYear}년 천명 대운 리포트가 서고에 자동 저장되었습니다.`);
       // 결과 수신 성공 → 세션 viewed 처리 (복구 방지)
       if (currentUser) {
         updateDoc(doc(db, "users", currentUser.uid, "session", "data"), { "annual.viewed": true }).catch(() => {});
@@ -693,7 +705,7 @@ const App: React.FC = () => {
             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">서비스 이용을 위해 아래 항목에 동의해 주세요</p>
             <label className="flex items-start space-x-3 cursor-pointer group">
               <div
-                onClick={() => setLoginAgreedTerms(!loginAgreedTerms)}
+                onClick={() => { const v = !loginAgreedTerms; setLoginAgreedTerms(v); localStorage.setItem('agreedTerms', String(v)); }}
                 className={`w-5 h-5 shrink-0 rounded-md border-2 flex items-center justify-center transition-all mt-0.5 ${loginAgreedTerms ? 'bg-indigo-600 border-indigo-500' : 'border-slate-600 group-hover:border-slate-400'}`}
               >
                 {loginAgreedTerms && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
@@ -738,11 +750,13 @@ const App: React.FC = () => {
   }
 
 
-  // 약관 동의 저장 핸들러 (기존 유저용)
+  // 약관 동의 저장 핸들러 (기존 유저 / 약관 개정 시 재동의)
+  // 개정 약관에 동의하는 경우 firstTermsAcceptedAt도 갱신 (새 버전 기준 최초 동의)
   const handleAcceptTerms = () => {
     const userDocRef = doc(db, "users", currentUser.uid);
-    updateDoc(userDocRef, { termsAcceptedAt: Date.now() }).catch(() =>
-      setDoc(userDocRef, { termsAcceptedAt: Date.now() }, { merge: true })
+    const now = Date.now();
+    updateDoc(userDocRef, { termsAcceptedAt: now, firstTermsAcceptedAt: now, termsVersion: CURRENT_TERMS_VERSION }).catch(() =>
+      setDoc(userDocRef, { termsAcceptedAt: now, firstTermsAcceptedAt: now, termsVersion: CURRENT_TERMS_VERSION }, { merge: true })
     );
     setTermsAccepted(true);
   };
@@ -752,6 +766,33 @@ const App: React.FC = () => {
       {/* 약관 모달 */}
       {showTermsModal && <LegalModal title="이용약관" subtitle="Terms of Service" onClose={() => setShowTermsModal(false)}><TermsContent /></LegalModal>}
       {showPrivacyModal && <LegalModal title="개인정보처리방침" subtitle="Privacy Policy" onClose={() => setShowPrivacyModal(false)}><PrivacyContent /></LegalModal>}
+
+      {/* 천부인 구매 확인 모달 */}
+      {showGoldenCardConfirm && (
+        <div className="fixed inset-0 z-[5600] flex items-center justify-center px-6" onClick={() => setShowGoldenCardConfirm(false)}>
+          <div className="absolute inset-0 bg-black/90 backdrop-blur-xl" />
+          <div className="relative glass p-10 rounded-[3rem] border border-yellow-500/30 w-full max-w-sm animate-in zoom-in-95 duration-300 shadow-[0_40px_80px_rgba(0,0,0,0.9)]" onClick={e => e.stopPropagation()}>
+            <div className="text-4xl text-center mb-6">⚠️</div>
+            <h3 className="text-center font-mystic font-black text-yellow-400 text-xl tracking-widest mb-3">천부인 소환</h3>
+            <p className="text-center text-sm text-slate-300 leading-relaxed mb-2">
+              <span className="text-yellow-400 font-black">50,000 루멘</span>을 사용하여<br/>천부인을 소환합니다.
+            </p>
+            <p className="text-center text-[11px] text-rose-400/80 leading-relaxed mb-8">
+              이 거래는 완료 후 취소하거나<br/>환불할 수 없습니다.
+            </p>
+            <div className="flex space-x-3">
+              <button
+                onClick={() => setShowGoldenCardConfirm(false)}
+                className="flex-1 py-4 rounded-2xl border border-white/10 text-slate-400 font-black text-sm tracking-widest hover:bg-white/5 transition-all"
+              >취소</button>
+              <button
+                onClick={() => { setShowGoldenCardConfirm(false); buyGoldenCard(); }}
+                className="flex-1 py-4 rounded-2xl bg-gradient-to-r from-yellow-600 to-amber-700 text-slate-950 font-black text-sm tracking-widest border-t border-white/30 hover:brightness-110 transition-all"
+              >소환하기</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 천부인 서사 모달 */}
       {showGoldenCardInfo && (
@@ -862,11 +903,11 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {view === 'square' && <CelestialSquare profile={profile} orb={orb} onUpdatePoints={updatePoints} onUpdateFavorites={updateFavorites} onBack={() => setView('main')} onToast={onToast} onGrowFromPost={handlePostCreated} isAdmin={isAdmin} lumenReceivedAt={lumenReceivedAt} />}
+      {view === 'square' && <CelestialSquare profile={profile} orb={orb} onUpdatePoints={updatePoints} onUpdateFavorites={updateFavorites} onBack={() => setView('main')} onToast={onToast} onGrowFromPost={handlePostCreated} isAdmin={isAdmin} lumenReceivedAt={lumenReceivedAt} lumenSenderName={lumenSenderName} />}
       {view === 'profile' && <UserProfilePage profile={profile} orb={orb} archives={archives} onUpdateProfile={onUpdateProfile} onUpdateOrb={onUpdateOrb} onWithdraw={handleWithdrawAction} onBack={() => setView('main')} onToast={onToast} isAdmin={isAdmin} subAdminConfig={subAdminConfig} onSubAdminConfigChange={setSubAdminConfig} onDeleteArchive={deleteArchive} hasNewReports={hasNewReports} onClearReportsBadge={() => setHasNewReports(false)} />}
       {view === 'analysis' && <MysticAnalysisLab lottoHistory={lottoHistory} onBack={() => setView('main')} />}
       {offeringData && <DivineEffect amount={offeringData.amount} multiplier={offeringData.multiplier} onComplete={handleOfferingComplete} />}
-      {toast && (<div className="fixed inset-0 flex items-center justify-center z-[6000] pointer-events-none px-6"><div className="bg-slate-900/40 backdrop-blur-3xl text-white px-12 py-7 rounded-[2.5rem] shadow-[0_40px_100px_rgba(0,0,0,0.8)] border border-white/10 text-center animate-in zoom-in-95 duration-500 max-w-md"><p className="text-xl font-bold leading-tight whitespace-pre-line">{toast}</p></div></div>)}
+      {toast && (<div className="fixed inset-0 flex items-center justify-center z-[6000] pointer-events-none px-6"><div className="bg-slate-900/40 backdrop-blur-3xl text-white px-12 py-7 rounded-[2.5rem] shadow-[0_40px_100px_rgba(0,0,0,0.8)] border border-white/10 text-center animate-in zoom-in-95 duration-500 max-w-md"><p className="text-sm sm:text-xl font-bold leading-tight whitespace-pre-line">{toast}</p></div></div>)}
 
       {confirmModal.isOpen && (
         <div className="fixed inset-0 flex items-center justify-center z-[7000] px-6">
@@ -897,15 +938,31 @@ const App: React.FC = () => {
       )}
 
       {view === 'main' && (<>
+      {showMenu && (
+        <>
+          <div className="fixed inset-0 z-[9998]" onClick={() => setShowMenu(false)} />
+          <div className="fixed top-[60px] right-4 w-56 bg-[#020617] p-2 rounded-2xl border border-white/10 shadow-2xl z-[9999] animate-in fade-in zoom-in-95 duration-200">
+            <button onClick={() => { setView('square'); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-indigo-600/20 text-indigo-100 text-xs font-black uppercase transition-all"><span>🌌</span><span>천상의 광장 가기</span></button>
+            <button onClick={() => { setView('analysis'); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-cyan-600/20 text-cyan-100 text-xs font-black uppercase transition-all"><span>📊</span><span>미스틱 분석 제단</span></button>
+            <button onClick={() => { setActiveTab('shop'); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-emerald-600/20 text-emerald-100 text-xs font-black uppercase transition-all"><span>💎</span><span>충전하기</span></button>
+            <button onClick={() => { setShowMiningModal(true); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-yellow-600/20 text-yellow-100 text-xs font-black uppercase transition-all"><span>⛏️</span><span>루멘 채굴</span></button>
+            {isAdmin && (
+              <button onClick={() => { setIsAdminModalOpen(true); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-amber-600/20 text-amber-100 text-xs font-black uppercase transition-all"><span>🎫</span><span>당첨번호 등록 (Admin)</span></button>
+            )}
+            <div className="h-[1px] bg-white/5 my-1"></div>
+            <button onClick={async () => { await logout(); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-red-600/20 text-red-100 text-xs font-black uppercase transition-all"><span>🚪</span><span>로그아웃</span></button>
+          </div>
+        </>
+      )}
       <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
       <div className="border-b border-white/5 px-8 py-4 flex justify-between items-center">
         <div className="flex items-center space-x-4">
           <img src="/s_mlotto_logo.png" alt="Mystic" className="w-10 h-10 object-contain drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
-          <div className="flex flex-col"><h2 className="text-2xl font-mystic font-black text-white tracking-widest leading-none">MYSTIC</h2><span className="text-[8px] text-indigo-400 uppercase font-bold tracking-[0.5em] mt-1">Lotto Resonance</span></div>
+          <div className="flex flex-col"><h2 className="text-lg sm:text-2xl font-mystic font-black text-white tracking-wider leading-none">MYSTIC LOTTO</h2><span className="text-[8px] text-indigo-400 uppercase font-bold tracking-[0.42em] sm:tracking-[0.5em] mt-1 whitespace-nowrap">Lotto Resonance</span></div>
         </div>
-        <div className="flex items-center space-x-6 text-right relative">
+        <div className="flex items-center space-x-6 text-right relative translate-x-[10px] sm:translate-x-0">
           <button onClick={() => setView('profile')} className="hover:bg-white/5 p-2 rounded-xl group flex items-center space-x-4">
-             <div className="text-right relative">
+             <div className="hidden sm:block text-right relative">
                <p className="text-[10px] text-slate-500 uppercase font-black">Fortune Seeker</p>
                <p className="text-base font-black text-white group-hover:text-indigo-400 transition-colors inline-flex items-center gap-1.5">
                  {orb.nickname || profile.name}님
@@ -914,39 +971,25 @@ const App: React.FC = () => {
                  )}
                </p>
              </div>
-             <OrbVisual level={orb.level} className="w-8 h-8 border border-white/10 group-hover:border-indigo-500/50 transition-all" overlayAnimation={getActiveDecoration(orb).overlayAnimation} />
+             <span className="translate-x-[7px] sm:translate-x-0">
+               <OrbVisual level={orb.level} className="w-8 h-8 border border-white/10 group-hover:border-indigo-500/50 transition-all" overlayAnimation={getActiveDecoration(orb).overlayAnimation} />
+             </span>
           </button>
           <div className="relative">
             <button onClick={() => setShowMenu(!showMenu)} className="w-10 h-10 rounded-xl border border-slate-800 flex flex-col items-center justify-center space-y-1 hover:bg-white/5 text-white">
               <span className="w-5 h-0.5 bg-white rounded-full"></span><span className="w-5 h-0.5 bg-white rounded-full"></span><span className="w-5 h-0.5 bg-white rounded-full"></span>
             </button>
-            {showMenu && (
-              <>
-                <div className="fixed inset-0 bg-transparent z-40" onClick={() => setShowMenu(false)}></div>
-                <div className="absolute top-full right-0 mt-2 w-56 bg-[#020617] p-2 rounded-2xl border border-white/10 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-200">
-                  <button onClick={() => { setView('square'); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-indigo-600/20 text-indigo-100 text-xs font-black uppercase transition-all"><span>🌌</span><span>천상의 광장 가기</span></button>
-                  <button onClick={() => { setView('analysis'); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-cyan-600/20 text-cyan-100 text-xs font-black uppercase transition-all"><span>📊</span><span>미스틱 분석 제단</span></button>
-                  <button onClick={() => { setActiveTab('shop'); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-emerald-600/20 text-emerald-100 text-xs font-black uppercase transition-all"><span>💎</span><span>충전하기</span></button>
-                  <button onClick={() => { setShowMiningModal(true); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-yellow-600/20 text-yellow-100 text-xs font-black uppercase transition-all"><span>⛏️</span><span>루멘 채굴</span></button>
-                  {isAdmin && (
-                    <button onClick={() => { setIsAdminModalOpen(true); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-amber-600/20 text-amber-100 text-xs font-black uppercase transition-all"><span>🎫</span><span>당첨번호 등록 (Admin)</span></button>
-                  )}
-                  <div className="h-[1px] bg-white/5 my-1"></div>
-                  <button onClick={async () => { await logout(); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-red-600/20 text-red-100 text-xs font-black uppercase transition-all"><span>🚪</span><span>로그아웃</span></button>
-                </div>
-              </>
-            )}
           </div>
         </div>
       </div>
 
-      <div className="px-8 py-16 space-y-24">
-        <div className="flex justify-center mb-10 overflow-x-auto pb-4 no-scrollbar">
-          <div className="bg-slate-950/50 border border-white/5 rounded-2xl p-1.5 flex space-x-2 shrink-0">
-             <button onClick={() => setActiveTab('orb')} className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'orb' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>운세 & 구슬</button>
-             <button onClick={() => setActiveTab('science')} className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'science' ? 'bg-cyan-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>지성 분석</button>
-             <button onClick={() => setActiveTab('treasury')} className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'treasury' ? 'bg-yellow-600 text-slate-950 shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>보관소</button>
-             <button onClick={() => setActiveTab('offering')} className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'offering' ? 'bg-rose-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>봉헌</button>
+      <div className="px-3 sm:px-8 pt-4 sm:pt-16 pb-16 space-y-12 sm:space-y-24">
+        <div className="flex justify-center mb-10 overflow-x-auto pb-4 no-scrollbar translate-y-5 sm:translate-y-0">
+          <div className="bg-slate-950/50 border border-white/5 rounded-2xl p-1 sm:p-1.5 flex space-x-1 sm:space-x-2 shrink-0">
+             <button onClick={() => setActiveTab('orb')} className={`px-[18px] sm:px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'orb' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>운세 & 구슬</button>
+             <button onClick={() => setActiveTab('science')} className={`px-[18px] sm:px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'science' ? 'bg-cyan-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>지성 분석</button>
+             <button onClick={() => setActiveTab('treasury')} className={`px-[18px] sm:px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'treasury' ? 'bg-yellow-600 text-slate-950 shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>보관소</button>
+             <button onClick={() => setActiveTab('offering')} className={`px-[18px] sm:px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'offering' ? 'bg-rose-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>봉헌</button>
           </div>
         </div>
         
@@ -973,43 +1016,65 @@ const App: React.FC = () => {
               )}
             </section>
             <section className="space-y-16 border-t border-white/5 pt-20">
-              <LottoGenerator result={result} savedAt={divineSavedAt} loading={loading} onGenerate={onDivineGenerateClick} onSlotGenerate={handleSlotResult} onReset={() => { setResult(null); setDivineSavedAt(null); }} hasExtractedToday={hasExtractedDivineToday} />
+              <LottoGenerator result={result} savedAt={divineSavedAt} loading={loading} onGenerate={onDivineGenerateClick} onSlotGenerate={handleSlotResult} onReset={() => { setResult(null); setDivineSavedAt(null); }} hasExtractedToday={hasExtractedDivineToday} onToast={onToast} />
             </section>
           </div>
         )}
 
         {activeTab === 'science' && (<section className="animate-in fade-in duration-700"><ScientificAnalysis loading={scienceLoading} result={scienceResult} onGenerate={onScienceGenerateClick} lottoHistory={lottoHistory} uid={currentUser?.uid} /></section>)}
         {activeTab === 'treasury' && (
-          <section className="flex flex-col items-center space-y-16 animate-in fade-in duration-700">
-             <div className="text-center relative flex flex-col items-center">
-               <div className="relative inline-block">
-                 <h2 className="text-4xl font-mystic font-black text-yellow-500 tracking-[0.6em] mb-4 uppercase">Sacred Vault</h2>
-                 <button
-                   onClick={() => setShowGoldenCardInfo(true)}
-                   className="absolute -right-7 -bottom-1 w-5 h-5 rounded-full border border-yellow-500/40 bg-yellow-500/10 text-yellow-500/60 text-[10px] font-black flex items-center justify-center hover:bg-yellow-500/20 hover:text-yellow-400 transition-all"
-                 >?</button>
-               </div>
+          <section className="flex flex-col items-center space-y-8 animate-in fade-in duration-700">
+             <h2 className="text-2xl sm:text-4xl font-mystic font-black text-yellow-500 tracking-[0.3em] sm:tracking-[0.6em] uppercase text-center whitespace-nowrap">Sacred Vault</h2>
+             <div className="sm:hidden h-0 overflow-visible relative w-full flex justify-center">
+               <p className="absolute top-2 font-mystic font-bold text-amber-400/70 text-xs tracking-[0.1em] text-center px-4 leading-relaxed">
+                 {orb.hasGoldenCard ? '당신은 이 영험하고 신령한 황금 카드의 주인이십니다' : '이 신령한 황금 카드의 주인이 되십시오'}
+               </p>
              </div>
              <div className="w-full flex flex-col items-center space-y-24">
                <div className="w-full flex flex-col items-center">
-                 <GoldenCard ownerName={orb.hasGoldenCard ? profile.name : ''} isVisible={true} cardId={orb.goldenCardId} hasCard={!!orb.hasGoldenCard} />
+                 <GoldenCard ownerName={orb.hasGoldenCard ? profile.name : ''} isVisible={true} cardId={orb.goldenCardId} hasCard={!!orb.hasGoldenCard} onInfoClick={() => setShowGoldenCardInfo(true)} />
+                 {/* 면책 고지 — 카드 바로 아래 우측 정렬, py-16 여백 안에 위치 */}
+                 <div className="w-full max-w-[520px] px-3 -mt-14">
+                   <p className="text-right text-[9px] text-slate-300 tracking-wider">※ 실물 카드가 아닌 디지털 유물입니다</p>
+                 </div>
                  {!orb.hasGoldenCard ? (
-                   <button onClick={buyGoldenCard} className="mt-10 px-16 py-6 bg-gradient-to-r from-yellow-600 to-amber-700 text-slate-950 font-black rounded-full shadow-2xl uppercase tracking-[0.3em] text-lg border-t-2 border-white/40">유물 소유하기 (50,000 L)</button>
+                   <div className="flex flex-col items-center space-y-4 mt-6 text-center">
+                     <p className="hidden sm:block font-mystic font-bold text-amber-400/80 text-sm tracking-[0.18em] whitespace-nowrap">이 신령한 황금 카드의 주인이 되십시오</p>
+                     <p className="text-[10px] text-amber-500/40 leading-relaxed tracking-widest">매일 당신의 이름이 새겨진 황금 카드로<br/>재물의 기운을 불러오세요</p>
+                     <button onClick={() => setShowGoldenCardConfirm(true)} className="px-14 py-5 bg-gradient-to-r from-yellow-600 to-amber-700 text-slate-950 font-black rounded-full shadow-2xl uppercase tracking-[0.12em] text-base border-t-2 border-white/40">유물 소유하기 (50,000 L)</button>
+                   </div>
                  ) : (
-                   <p className="mt-10 text-center text-sm font-bold text-amber-500/60 italic tracking-wide leading-relaxed">당신은 이 영험하고 신령한 황금 카드의 주인이십니다.</p>
+                   <div className="mt-6 flex flex-col items-center space-y-2 text-center">
+                     <p className="hidden sm:block text-sm font-bold text-amber-500/60 italic tracking-wide leading-relaxed">당신은 이 영험하고 신령한 황금 카드의 주인이십니다.</p>
+                     <p className="text-sm text-amber-500/50 leading-relaxed tracking-wide">매일 당신의 이름이 새겨진 황금 카드로<br/>재물의 기운을 불러오세요</p>
+                   </div>
                  )}
+               </div>
+               <div className="w-full flex items-center gap-4 px-2 opacity-20">
+                 <div className="flex-1 h-px bg-gradient-to-r from-transparent to-amber-500"></div>
+                 <span className="text-amber-500 text-xs">✦</span>
+                 <div className="flex-1 h-px bg-gradient-to-l from-transparent to-amber-500"></div>
                </div>
                <div className="w-full max-w-5xl">
                  {currentDestiny ? (
-                   <div className="w-full glass p-12 rounded-[4rem] border border-amber-500/30 shadow-2xl relative overflow-hidden bg-gradient-to-b from-amber-500/5 to-transparent">
+                   <div className="w-full glass p-4 sm:p-12 rounded-[2.5rem] sm:rounded-[4rem] border border-amber-500/30 shadow-2xl relative overflow-hidden bg-gradient-to-b from-amber-500/5 to-transparent">
                      <div className="flex flex-col items-center space-y-8">
                         <h3 className="text-center text-[10px] font-black text-amber-500 tracking-[0.8em] uppercase">Annual Eternal Scroll Activated</h3>
-                        <div className="flex justify-center flex wrap gap-4">{currentDestiny.numbers.map((num, i) => <div key={i} className="w-20 h-20 rounded-full flex items-center justify-center bg-gradient-to-br from-amber-400 to-amber-700 text-slate-950 font-black text-3xl shadow-xl border-t-2 border-white/40">{num}</div>)}</div>
-                        <div className="p-10 bg-black/40 rounded-[3rem] border border-white/5 w-full">
+                        <div className="flex justify-center gap-2 sm:gap-4">{currentDestiny.numbers.map((num, i) => <div key={i} className="w-14 h-14 sm:w-20 sm:h-20 rounded-full flex items-center justify-center bg-gradient-to-br from-amber-400 to-amber-700 text-slate-950 font-black text-xl sm:text-3xl shadow-xl border-t-2 border-white/40">{num}</div>)}</div>
+                        <div className="p-5 sm:p-10 bg-black/40 rounded-[2rem] sm:rounded-[3rem] border border-white/5 w-full">
                            <h4 className="text-amber-500 font-mystic font-black text-lg mb-6">올해 대운의 흐름</h4>
                            <p className="text-sm text-indigo-50/70 leading-relaxed italic line-clamp-3">{currentDestiny.reason}</p>
-                           <button onClick={() => setShowFullAnnualReport(true)} className="mt-8 px-10 py-4 bg-amber-600/20 border border-amber-600/40 rounded-2xl text-amber-100 text-xs font-black uppercase tracking-widest hover:bg-amber-600 transition-all w-full">전체 정밀 리포트 회람하기</button>
+                           <button onClick={() => setShowFullAnnualReport(true)} className="mt-8 px-10 py-4 bg-amber-600/20 border border-amber-600/40 rounded-2xl text-amber-100 text-xs font-black uppercase tracking-widest hover:bg-amber-600 transition-all w-full">전체보기</button>
                         </div>
+                        {isAdmin && (
+                          <button
+                            onClick={startFixedRitual}
+                            disabled={fixedRitualLoading}
+                            className="px-8 py-3 bg-rose-900/40 border border-rose-500/30 rounded-2xl text-rose-300 text-[10px] font-black uppercase tracking-widest hover:bg-rose-700/50 transition-all disabled:opacity-50"
+                          >
+                            {fixedRitualLoading ? '생성 중...' : '⚙ 관리자: 천명수 재생성 (제한 없음)'}
+                          </button>
+                        )}
                      </div>
                    </div>
                  ) : (
@@ -1028,7 +1093,7 @@ const App: React.FC = () => {
               <div className="inline-flex items-center space-x-3 bg-emerald-500/10 border border-emerald-500/30 px-5 py-2 rounded-full">
                 <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Coming Soon</span>
               </div>
-              <h2 className="text-4xl font-mystic font-black text-white tracking-[0.4em] uppercase">Nadir Shop</h2>
+              <h2 className="text-3xl sm:text-4xl font-mystic font-black text-white tracking-[0.3em] sm:tracking-[0.4em] uppercase whitespace-nowrap">Nadir Shop</h2>
               <p className="text-slate-500 text-xs font-bold">나디르 충전 서비스가 준비 중입니다</p>
               <p className="text-rose-400/80 text-[10px] font-bold mt-1">표시된 가격은 부가세(VAT 10%)가 포함된 최종 결제금액입니다.</p>
             </div>
@@ -1040,7 +1105,7 @@ const App: React.FC = () => {
                 <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">나디르 충전</h3>
                 <span className="ml-auto text-[9px] font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full uppercase">준비 중</span>
               </div>
-              <div className="p-4 space-y-3">
+              <div className="px-2 py-4 sm:p-4 space-y-3">
                 {[
                   { price: '1,000원',  base: '1,000',  bonus: null,      lidAngle: 5,  scale: 0.72, innerCoins: false, coins: [] as number[][],                                                                      border: 'border-white/10',       bg: 'bg-white/[0.02]',      glow: 'drop-shadow(0 0 4px rgba(255,255,255,0.12))' },
                   { price: '5,000원',  base: '5,000',  bonus: '500',     lidAngle: 22, scale: 0.86, innerCoins: false, coins: [[-15,-6],[13,-9]] as number[][],                                                       border: 'border-emerald-500/20', bg: 'bg-emerald-500/[0.03]', glow: 'drop-shadow(0 0 7px rgba(52,211,153,0.45))' },
@@ -1050,7 +1115,7 @@ const App: React.FC = () => {
                   const bodyY = 22, lidH = 14, lidY = bodyY - lidH;
                   const sw = Math.round(44 * plan.scale), sh = Math.round(40 * plan.scale);
                   return (
-                    <div key={i} className={`relative flex items-center justify-between px-5 py-3 rounded-2xl border ${plan.border} ${plan.bg} overflow-visible`} style={{ minHeight: 80 }}>
+                    <div key={i} className={`relative flex items-center justify-between px-3 sm:px-5 py-3 rounded-2xl border ${plan.border} ${plan.bg} overflow-visible`} style={{ minHeight: 80 }}>
                       {/* 가격 */}
                       <p className="text-sm font-black text-white whitespace-nowrap">{plan.price}</p>
                       {/* 보물함 + 나디르 */}
@@ -1123,7 +1188,7 @@ const App: React.FC = () => {
                 <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">구독 플랜</h3>
                 <span className="ml-auto text-[9px] font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full uppercase">준비 중</span>
               </div>
-              <div className="p-4 space-y-3">
+              <div className="px-2 py-4 sm:p-4 space-y-3">
                 {/* 월정액 */}
                 {(() => {
                   const bodyY = 22, lidH = 14, lidY = bodyY - lidH, sc = 1.05, ang = 48;
@@ -1131,7 +1196,7 @@ const App: React.FC = () => {
                   const glow = 'drop-shadow(0 0 10px rgba(99,102,241,0.5))';
                   const coins = [[-16,-4],[14,-8],[-8,-18],[12,-16],[0,-22]] as number[][];
                   return (
-                    <div className="flex items-center justify-between px-5 py-4 rounded-2xl border border-indigo-500/30 bg-indigo-500/5 overflow-visible">
+                    <div className="flex items-center justify-between px-3 sm:px-5 py-4 rounded-2xl border border-indigo-500/30 bg-indigo-500/5 overflow-visible">
                       <div>
                         <p className="text-sm font-black text-white">월정액</p>
                         <p className="text-[10px] text-slate-400 mt-0.5">매월 자동 갱신</p>
@@ -1175,7 +1240,7 @@ const App: React.FC = () => {
                   const glow = 'drop-shadow(0 0 18px rgba(251,191,36,0.8))';
                   const coins = [[-16,-4],[14,-8],[-9,-18],[13,-20],[-4,-24],[10,-14],[2,-22],[-14,-11],[16,-2],[5,-27]] as number[][];
                   return (
-                    <div className="relative flex items-center justify-between px-5 py-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 overflow-visible">
+                    <div className="relative flex items-center justify-between px-3 sm:px-5 py-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 overflow-visible">
                       <div>
                         <div className="flex items-center gap-2">
                           <p className="text-sm font-black text-white">연간 구독</p>
@@ -1245,11 +1310,11 @@ const App: React.FC = () => {
                 <span className="text-lg">💎</span>
                 <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">나디르 (Nadir) — 충전 화폐</h3>
               </div>
-              <div className="p-6 space-y-3 text-sm text-slate-300 leading-relaxed">
-                <p>• 현금으로 직접 충전하는 기본 화폐입니다.</p>
-                <p>• 천상의 봉헌 제단에서 나디르를 봉헌하면 확률에 따라 <span className="text-amber-400 font-bold">최대 10배의 루멘</span>으로 돌아옵니다.</p>
-                <p>• 나디르는 디지털 재화로, <span className="text-rose-400 font-bold">사용함으로써 상품 가치가 훼손되므로 취소 및 환불이 불가</span>합니다.</p>
-                <p>• 회원 탈퇴 시 <span className="text-slate-400 font-bold">구매일로부터 7일 이내 미사용 나디르</span>는 고객센터를 통해 환불 신청이 가능합니다. 단, 7일이 초과되거나 7일 이내라도 사용된 잔여 나디르는 소멸됩니다.</p>
+              <div className="p-6 space-y-3 text-sm text-slate-300 leading-relaxed bullet-list">
+                <p><span className="bullet">•</span><span>현금으로 직접 충전하는 기본 화폐입니다.</span></p>
+                <p><span className="bullet">•</span><span>천상의 봉헌 제단에서 나디르를 봉헌하면 확률에 따라 <span className="text-amber-400 font-bold">최대 10배의 루멘</span>으로 돌아옵니다.</span></p>
+                <p><span className="bullet">•</span><span>나디르는 디지털 재화로, <span className="text-rose-400 font-bold">사용함으로써 상품 가치가 훼손되므로 취소 및 환불이 불가</span>합니다.</span></p>
+                <p><span className="bullet">•</span><span>회원 탈퇴 시 <span className="text-slate-400 font-bold">구매일로부터 7일 이내 미사용 나디르</span>는 고객센터를 통해 환불 신청이 가능합니다. 단, 7일이 초과되거나 7일 이내라도 사용된 잔여 나디르는 소멸됩니다.</span></p>
               </div>
             </div>
 
@@ -1259,12 +1324,12 @@ const App: React.FC = () => {
                 <span className="text-lg">✨</span>
                 <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">루멘 (Lumen) — 활동 화폐</h3>
               </div>
-              <div className="p-6 space-y-3 text-sm text-slate-300 leading-relaxed">
-                <p>• 봉헌·출석·활동을 통해 획득하는 앱 내 화폐입니다.</p>
-                <p>• 천기누설, 천명수, 지성분석 등 <span className="text-indigo-400 font-bold">모든 콘텐츠를 루멘으로 이용</span>합니다.</p>
-                <p>• 루멘은 나디르나 현금으로 역환전되지 않으며, <span className="text-rose-400 font-bold">환불이 불가</span>합니다.</p>
-                <p>• 회원 탈퇴 시 잔여 루멘은 소멸됩니다.</p>
-                <p>• 앱 외부에서 취득한 루멘은 <span className="text-rose-400 font-bold">어떠한 경우에도 사용 불가</span>합니다.</p>
+              <div className="p-6 space-y-3 text-sm text-slate-300 leading-relaxed bullet-list">
+                <p><span className="bullet">•</span><span>봉헌·출석·활동을 통해 획득하는 앱 내 화폐입니다.</span></p>
+                <p><span className="bullet">•</span><span>천기누설, 천명수, 지성분석 등 <span className="text-indigo-400 font-bold">모든 콘텐츠를 루멘으로 이용</span>합니다.</span></p>
+                <p><span className="bullet">•</span><span>루멘은 나디르나 현금으로 역환전되지 않으며, <span className="text-rose-400 font-bold">환불이 불가</span>합니다.</span></p>
+                <p><span className="bullet">•</span><span>회원 탈퇴 시 잔여 루멘은 소멸됩니다.</span></p>
+                <p><span className="bullet">•</span><span>앱 외부에서 취득한 루멘은 <span className="text-rose-400 font-bold">어떠한 경우에도 사용 불가</span>합니다.</span></p>
               </div>
             </div>
 
@@ -1279,9 +1344,9 @@ const App: React.FC = () => {
                   { icon: '🏛️', title: '봉헌 제단 봉헌', desc: '나디르 봉헌 시 확률에 따라 1배~10배 루멘 보상 (레벨이 높을수록 고배율 확률 상승)', badge: null },
                   { icon: '📅', title: '매일 방문 보너스', desc: '앱 방문 시 하루 1회 +100 루멘 지급 (자정 기준 갱신)', badge: null },
                   { icon: '📺', title: '광고 시청', desc: '편당 +300 루멘, 하루 최대 5회 (1,500 루멘/일)', badge: '준비 중' },
-                  { icon: '🔮', title: '구슬 수련', desc: '구슬 탭 시 EXP 획득 → 레벨 성장 → 봉헌 고배율 확률 상승 (하루 최대 +0.5레벨)', badge: null },
                   { icon: '📝', title: '회람판 글 작성', desc: '+0.1레벨/편, 하루 최대 5편 (+0.5레벨/일)', badge: null },
-                  { icon: '👍', title: '공명(좋아요) 달성', desc: '내 글이 공명 10개 단위를 넘을 때마다 +0.1레벨 (자기 공명 제외)', badge: null },
+                  { icon: '👍', title: '공명(좋아요) 달성', desc: '내 글이 공명 10개 단위를 넘을 때마다 +0.1레벨 (무제한)', badge: null },
+                  { icon: '🎁', title: '루멘 선물 받기', desc: '대화방에서 다른 유저로부터 루멘 선물받기', badge: null },
                 ].map((item, i) => (
                   <div key={i} className="flex items-start space-x-4 px-6 py-4">
                     <span className="text-xl shrink-0 mt-0.5">{item.icon}</span>
@@ -1336,7 +1401,8 @@ const App: React.FC = () => {
                   <p>🏛️ 봉헌 → 확률 보상 (1배~10배)</p>
                   <p>📅 매일 방문 → +100 루멘</p>
                   <p>📺 광고 시청 → +300 루멘/편, 최대 5회 <span className="text-amber-500/70">(준비 중)</span></p>
-                  <p>🔮 구슬 수련·글 작성·공명 → 레벨 성장</p>
+                  <p>📝 글 작성·공명 → 레벨 성장</p>
+                  <p>🎁 대화방 루멘 선물 받기</p>
                 </div>
               </div>
               <p className="text-[10px] text-slate-600 text-center">상세 내용은 <span className="text-slate-500 underline underline-offset-2">메뉴 → 충전하기</span>에서 언제든지 확인할 수 있습니다.</p>
@@ -1351,12 +1417,16 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <footer className="relative shrink-0 border-t border-white/10 px-10 py-8 flex items-center justify-between z-[200] shadow-2xl">
+      <footer className="relative shrink-0 border-t border-white/10 px-5 sm:px-10 py-3 sm:py-8 flex items-center justify-between z-[200] shadow-2xl">
         <div className="absolute inset-0 bg-white/[0.02] backdrop-blur-3xl -z-10 pointer-events-none" />
-         <div className="flex items-center space-x-8">
+         <div className="flex items-center space-x-4 sm:space-x-8 sm:cursor-default cursor-pointer active:opacity-70 transition-opacity" onClick={() => setView('profile')}>
             <div className="relative">
-              <OrbVisual level={orb.level} className="w-16 h-16 border-2 border-white/10" overlayAnimation={getActiveDecoration(orb).overlayAnimation} />
-              <div className="absolute -top-2 -right-2 bg-indigo-600 text-[11px] font-black px-3 py-1 rounded-xl z-10">LV.{orb.level}</div>
+              <OrbVisual level={orb.level} className="w-12 h-12 sm:w-16 sm:h-16 border-2 border-white/10" overlayAnimation={getActiveDecoration(orb).overlayAnimation} />
+              <div className="absolute -top-2 -right-2 bg-indigo-600 text-[9px] sm:text-[11px] font-black px-2 py-0.5 sm:px-3 sm:py-1 rounded-xl z-10">LV.{orb.level}</div>
+            </div>
+            {/* 모바일 전용 닉네임 */}
+            <div className="sm:hidden flex flex-col justify-end mt-[20px]">
+              <p className="text-[13px] text-indigo-400 font-bold">{orb.nickname || profile.name}님</p>
             </div>
             <div className="hidden sm:block">
                <p className="text-xl font-black text-white tracking-tight">{orb.level}단계 수련자</p>
@@ -1367,8 +1437,8 @@ const App: React.FC = () => {
             </div>
          </div>
          <div className="text-right">
-            <p className="text-[11px] text-slate-500 font-black uppercase tracking-widest mb-1.5">Divine Essence (루멘)</p>
-            <p className="text-3xl font-mystic font-black text-yellow-500 tabular-nums">{displayPoints(orb.points)} <span className="text-sm font-sans">L</span></p>
+            <p className="text-[10px] sm:text-[11px] text-slate-500 font-black uppercase tracking-tight sm:tracking-widest mb-1">Divine Essence (루멘)</p>
+            <p className="text-xl sm:text-3xl font-mystic font-black text-yellow-500 tabular-nums">{displayPoints(orb.points)} <span className="text-sm font-sans">L</span></p>
          </div>
       </footer>
       </>)}

@@ -11,6 +11,7 @@ interface LottoGeneratorProps {
   onSave?: (result: FortuneResult) => void;
   onReset?: () => void;
   hasExtractedToday: boolean;
+  onToast?: (msg: string) => void;
 }
 
 const SacredMandala = () => (
@@ -43,7 +44,7 @@ const SacredMandala = () => (
   </svg>
 );
 
-const LottoGenerator: React.FC<LottoGeneratorProps> = ({ result, savedAt, loading, onGenerate, onSlotGenerate, onSave, onReset, hasExtractedToday }) => {
+const LottoGenerator: React.FC<LottoGeneratorProps> = ({ result, savedAt, loading, onGenerate, onSlotGenerate, onSave, onReset, hasExtractedToday, onToast }) => {
   const [genMode, setGenMode] = useState<'divine' | 'slots'>('divine');
   const [stopOrderMode, setStopOrderMode] = useState<'sequential' | 'random'>('sequential');
   const [gameCount, setGameCount] = useState<number>(1);
@@ -190,7 +191,7 @@ const LottoGenerator: React.FC<LottoGeneratorProps> = ({ result, savedAt, loadin
     if (!result) return;
     const text = result.luckyNumbers.join(', ');
     navigator.clipboard.writeText(text);
-    alert('천기가 복사되었습니다: ' + text);
+    onToast?.('천기가 복사되었습니다: ' + text);
   };
 
   useEffect(() => {
@@ -333,10 +334,10 @@ const LottoGenerator: React.FC<LottoGeneratorProps> = ({ result, savedAt, loadin
         </div>
 
         <div className="bg-slate-950/60 p-1 rounded-2xl border border-white/5 flex">
-          <button onClick={() => { setGenMode('divine'); onReset?.(); setSlotResults([]); }} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${genMode === 'divine' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}>Divine Resonance (오늘의 천기)</button>
-          <button onClick={() => { setGenMode('slots'); onReset?.(); }} className={`relative px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${genMode === 'slots' ? 'bg-yellow-600 text-slate-950 shadow-lg' : 'text-slate-500'}`}>
-            Celestial Reels (행운 카드)
-            <span className="absolute -top-2 -right-5 bg-gradient-to-br from-[#FFD700] via-[#FDB931] to-[#9E7E38] text-slate-950 text-[8px] font-black px-3 py-0.5 rounded-sm shadow-[0_8px_16px_rgba(0,0,0,0.6)] rotate-[20deg] border border-white/20 tracking-widest overflow-hidden z-30 uppercase">
+          <button onClick={() => { setGenMode('divine'); onReset?.(); setSlotResults([]); }} className={`px-8 sm:px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all leading-tight ${genMode === 'divine' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}>Divine Resonance<br className="sm:hidden" />(오늘의 천기)</button>
+          <button onClick={() => { setGenMode('slots'); onReset?.(); }} className={`relative px-8 sm:px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all leading-tight ${genMode === 'slots' ? 'bg-yellow-600 text-slate-950 shadow-lg' : 'text-slate-500'}`}>
+            Celestial Reels<br className="sm:hidden" />(행운 카드)
+            <span className="absolute -top-2 -right-2 sm:-right-5 bg-gradient-to-br from-[#FFD700] via-[#FDB931] to-[#9E7E38] text-slate-950 text-[8px] font-black px-3 py-0.5 rounded-sm shadow-[0_8px_16px_rgba(0,0,0,0.6)] rotate-[20deg] border border-white/20 tracking-widest overflow-hidden z-30 uppercase">
               <span className="relative z-10 drop-shadow-sm">FREE</span>
               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/80 to-transparent -translate-x-full animate-ribbon-shine"></div>
             </span>
@@ -375,17 +376,17 @@ const LottoGenerator: React.FC<LottoGeneratorProps> = ({ result, savedAt, loadin
               <button 
                 disabled={hasExtractedToday}
                 onClick={() => { if(!hasExtractedToday) { onGenerate(); setIsSaved(false); } }} 
-                className={`relative px-12 py-6 bg-gradient-to-b from-slate-800 to-slate-950 border-2 rounded-[2rem] font-black text-xl transition-all shadow-2xl group overflow-hidden ${hasExtractedToday ? 'border-slate-700 opacity-60 cursor-not-allowed' : 'border-indigo-500/50 hover:border-indigo-400 hover:text-white text-indigo-100'}`}
+                className={`relative px-8 py-4 sm:px-12 sm:py-6 bg-gradient-to-b from-slate-800 to-slate-950 border-2 rounded-[2rem] font-black text-xl transition-all shadow-2xl group overflow-hidden ${hasExtractedToday ? 'border-slate-700 opacity-60 cursor-not-allowed' : 'border-indigo-500/50 hover:border-indigo-400 hover:text-white text-indigo-100'}`}
               >
                 <span className="relative z-10 tracking-[0.1em]">
                   {hasExtractedToday ? (
                     <div className="flex flex-col items-center">
-                      <span className="text-lg">금일 기운 받음</span>
+                      <span className="text-sm sm:text-lg">금일 기운 받음</span>
                       <span className="text-[10px] opacity-40 mt-1 font-bold tracking-widest">(자정 이후 가능)</span>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center">
-                      <span className="text-lg">천기누설: 번호 추출</span>
+                      <span className="text-sm sm:text-lg">천기누설: 번호 추출</span>
                       <span className="text-xs opacity-60 mt-1 font-bold tracking-widest">(+1,000 L)</span>
                     </div>
                   )}
@@ -411,12 +412,12 @@ const LottoGenerator: React.FC<LottoGeneratorProps> = ({ result, savedAt, loadin
             )}
           </div>
         ) : (
-          <div className="w-full flex flex-col items-center space-y-12 animate-in zoom-in-95 duration-700">
-            <div className="relative flex flex-col items-center">
+          <div className="w-full flex flex-col items-center space-y-4 sm:space-y-12 animate-in zoom-in-95 duration-700">
+            <div className="relative flex flex-col items-center py-[30px] sm:py-0">
                <div className="absolute -top-[43px] px-6 py-1.5 bg-yellow-500/10 border border-yellow-500/30 rounded-full text-[10px] font-black text-yellow-500 uppercase tracking-widest animate-pulse z-10">
                   {isSpinning || (stoppedIndices.length > 0 && !allGamesFinished) ? `GAME ${currentGameIdx + 1} RESONATING...` : `READY FOR FATE`}
                </div>
-               <div className="grid grid-cols-6 gap-3 sm:gap-4 md:gap-5 w-full max-w-4xl px-4 min-h-[160px]">
+               <div className="grid grid-cols-6 gap-3 sm:gap-4 md:gap-5 w-full max-w-4xl px-4 min-h-[80px] sm:min-h-[160px]">
                 {reels.map((val, idx) => {
                   const showBack = val === null || isShuffling;
                   const isStopped = stoppedIndices.includes(idx);
@@ -442,20 +443,20 @@ const LottoGenerator: React.FC<LottoGeneratorProps> = ({ result, savedAt, loadin
                   <button 
                     disabled={isSpinning || isShuffling || (stoppedIndices.length > 0)} 
                     onClick={handleStartSpin} 
-                    className={`px-14 py-6 rounded-[2.5rem] font-black tracking-widest text-xl transition-all shadow-2xl border-b-4 ${(isSpinning || isShuffling || stoppedIndices.length > 0) ? 'bg-slate-800 text-slate-500 border-slate-900 cursor-not-allowed opacity-50' : 'bg-yellow-600 text-slate-950 border-yellow-800 hover:scale-105 active:scale-95'}`}
+                    className={`px-8 sm:px-14 py-3 sm:py-6 rounded-[2.5rem] font-black tracking-widest text-sm sm:text-xl transition-all shadow-2xl border-b-4 ${(isSpinning || isShuffling || stoppedIndices.length > 0) ? 'bg-slate-800 text-slate-500 border-slate-900 cursor-not-allowed opacity-50' : 'bg-yellow-600 text-slate-950 border-yellow-800 hover:scale-105 active:scale-95'}`}
                   >
                     {isShuffling ? '운명 정렬 중...' : '천운 돌리기'}
                   </button>
                   <button 
                     disabled={!isSpinning || stoppedIndices.length > 0} 
                     onClick={handleStopSpin} 
-                    className={`px-14 py-6 rounded-[2.5rem] font-black tracking-widest text-xl border-2 transition-all ${(!isSpinning || stoppedIndices.length > 0) ? 'border-slate-800 text-slate-700 pointer-events-none opacity-50' : 'border-red-500 bg-red-500/10 text-red-500 animate-pulse hover:bg-red-500/20'}`}
+                    className={`px-8 sm:px-14 py-3 sm:py-6 rounded-[2.5rem] font-black tracking-widest text-sm sm:text-xl border-2 transition-all ${(!isSpinning || stoppedIndices.length > 0) ? 'border-slate-800 text-slate-700 pointer-events-none opacity-50' : 'border-red-500 bg-red-500/10 text-red-500 animate-pulse hover:bg-red-500/20'}`}
                   >
                     멈춤! (STOP)
                   </button>
                 </>
               ) : (
-                <button onClick={handleShuffle} className="px-20 py-6 rounded-[2.5rem] font-black tracking-widest text-xl bg-indigo-600 text-white shadow-2xl hover:scale-105 active:scale-95 transition-all border-b-4 border-indigo-900">새로고침 (SHUFFLE)</button>
+                <button onClick={handleShuffle} className="px-10 sm:px-20 py-3 sm:py-6 rounded-[2.5rem] font-black tracking-widest text-sm sm:text-xl bg-indigo-600 text-white shadow-2xl hover:scale-105 active:scale-95 transition-all border-b-4 border-indigo-900">새로고침 (SHUFFLE)</button>
               )}
             </div>
           </div>
@@ -523,22 +524,22 @@ const LottoGenerator: React.FC<LottoGeneratorProps> = ({ result, savedAt, loadin
                <div className="w-full space-y-4">
                   {slotResults.map((game, gIdx) => (
                     <div key={`slot-game-${gIdx}`} className="glass p-5 rounded-[2rem] border border-yellow-500/20 flex items-center justify-between animate-in fade-in slide-in-from-bottom-4" style={{animationDelay: `${gIdx * 100}ms`}}>
-                       <div className="flex items-center space-x-6">
-                          <span className="text-[10px] font-black text-yellow-500 uppercase px-4 py-2 bg-yellow-500/10 rounded-full border border-yellow-500/20 min-w-[80px] text-center">GAME {gIdx + 1}</span>
-                          <div className="flex gap-2 sm:gap-3">
+                       <div className="flex items-center space-x-2 sm:space-x-6">
+                          <span className="text-[10px] font-black text-yellow-500 uppercase px-2 sm:px-4 py-2 bg-yellow-500/10 rounded-full border border-yellow-500/20 min-w-[60px] sm:min-w-[80px] text-center">GAME {gIdx + 1}</span>
+                          <div className="flex gap-1.5 sm:gap-3">
                              {game.map((num, nIdx) => (
-                               <div key={nIdx} className="w-9 h-9 sm:w-11 sm:h-11 rounded-full flex items-center justify-center bg-slate-800 border-t border-white/10 text-white font-black text-sm sm:text-base shadow-lg">
+                               <div key={nIdx} className="w-7 h-7 sm:w-11 sm:h-11 rounded-full flex items-center justify-center bg-slate-800 border-t border-white/10 text-white font-black text-xs sm:text-base shadow-lg">
                                  {num}
                                </div>
                              ))}
                           </div>
                        </div>
-                       <button 
-                         onClick={() => { 
-                           navigator.clipboard.writeText(game.join(', ')); 
-                           alert(`${gIdx + 1}번째 게임 번호가 복사되었습니다.`); 
-                         }} 
-                         className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-slate-500 hover:text-yellow-500 hover:bg-white/10 transition-all border border-white/5"
+                       <button
+                         onClick={() => {
+                           navigator.clipboard.writeText(game.join(', '));
+                           onToast?.(`GAME ${gIdx + 1} 번호가 복사되었습니다.`);
+                         }}
+                         className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-white/5 flex items-center justify-center text-slate-500 hover:text-yellow-500 hover:bg-white/10 transition-all border border-white/5 shrink-0"
                         >
                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
                        </button>

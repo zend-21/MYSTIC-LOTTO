@@ -385,7 +385,7 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
   const BENFORD_IDEAL = [30.1, 17.6, 12.5, 9.7, 7.9, 6.7, 5.8, 5.1, 4.6];
 
   return (
-    <div className="w-full max-w-[640px] mx-auto space-y-12 animate-in fade-in duration-1000 pb-24 px-4">
+    <div className="w-full max-w-[640px] mx-auto space-y-12 animate-in fade-in duration-1000 pb-24 px-[1px] sm:px-4">
       {/* 입력 누락 모달 */}
       {showAdvancedWarning && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
@@ -402,11 +402,11 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
       {showDocs && (
         <div className="fixed inset-0 z-[9000] flex items-center justify-center p-4 sm:p-6 bg-black/95 backdrop-blur-3xl animate-in fade-in duration-500">
            <div className="glass p-8 sm:p-12 rounded-[3.5rem] border border-cyan-500/30 w-full max-w-4xl shadow-[0_0_150px_rgba(6,182,212,0.3)] space-y-10 relative max-h-[90vh] overflow-y-auto custom-scroll">
-              <button onClick={() => setShowDocs(false)} className="absolute top-10 right-10 text-slate-500 hover:text-white transition-colors text-3xl">✕</button>
+              <button onClick={() => setShowDocs(false)} className="absolute top-7 sm:top-10 right-10 text-slate-500 hover:text-white transition-colors text-3xl">✕</button>
               
-              <div className="text-center space-y-3">
-                <h3 className="text-4xl font-mystic font-black text-white tracking-widest uppercase">지성 분석 아키텍처 가이드</h3>
-                <p className="text-[11px] text-cyan-400 font-black tracking-[0.5em] uppercase">Holistic Synthesis Protocol v6.0</p>
+              <div className="text-center space-y-3 mt-6 sm:mt-0">
+                <h3 className="text-2xl sm:text-4xl font-mystic font-black text-white tracking-tight sm:tracking-widest uppercase whitespace-nowrap">지성 분석 아키텍처 가이드</h3>
+                <p className="text-[11px] text-cyan-400 font-black tracking-[0.15em] sm:tracking-[0.5em] uppercase whitespace-nowrap">Holistic Synthesis Protocol v6.0</p>
               </div>
 
               <div className="p-8 bg-cyan-500/5 rounded-[2.5rem] border border-cyan-500/20 text-center">
@@ -459,10 +459,10 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
               </div>
 
               <div className="p-10 bg-gradient-to-br from-cyan-600/10 to-transparent rounded-[3rem] border border-cyan-500/30 text-center space-y-4">
-                 <h5 className="text-cyan-400 font-black text-lg uppercase tracking-widest">유기적 동기화 완료 (Synthesis Complete)</h5>
+                 <h5 className="text-cyan-400 font-black text-sm sm:text-lg uppercase tracking-tight sm:tracking-widest text-center">유기적 동기화 완료<br /> (Synthesis Complete)</h5>
                  <p className="text-sm text-slate-300 leading-relaxed">
                    이 모든 과정은 버튼을 누르는 찰나의 순간에 이루어지며, <br/>
-                   **"합계-패턴-회귀-엔진"**이 모두 동의하는 단 하나의 숫자 세트가 당신의 화면에 계시됩니다.
+                   "합계-패턴-회귀-엔진"이 모두 동의하는 단 하나의 숫자 세트가 당신의 화면에 계시됩니다.
                  </p>
               </div>
 
@@ -476,8 +476,8 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
            <div className="glass p-8 sm:p-12 rounded-[3.5rem] border border-yellow-500/30 w-full max-w-3xl shadow-[0_0_100px_rgba(234,179,8,0.2)] space-y-8 relative max-h-[90vh] overflow-y-auto custom-scroll">
               <button onClick={() => setShowSumGuide(false)} className="absolute top-8 right-8 text-slate-500 hover:text-white transition-colors text-2xl">✕</button>
               <div className="text-center space-y-2">
-                <h3 className="text-3xl font-mystic font-black text-yellow-500 tracking-widest uppercase">합계 제어 시스템 가이드</h3>
-                <p className="text-[10px] text-slate-500 font-black tracking-[0.4em] uppercase">Laboratory Summation Logic Guide</p>
+                <h3 className="text-2xl sm:text-3xl font-mystic font-black text-yellow-500 tracking-tight sm:tracking-widest uppercase whitespace-nowrap">합계 제어 시스템 가이드</h3>
+                <p className="text-[10px] text-slate-500 font-black tracking-[0.15em] sm:tracking-[0.4em] uppercase whitespace-nowrap">Laboratory Summation Logic Guide</p>
               </div>
               <div className="space-y-8">
                 <div className="p-8 bg-amber-500/10 rounded-[2rem] border border-amber-500/20 space-y-4">
@@ -522,7 +522,7 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
 
                 <div className="p-6 bg-yellow-500/5 rounded-2xl border border-yellow-500/20">
                    <p className="text-sm text-yellow-500 font-black text-center mb-2">💡 요약 및 전략</p>
-                   <p className="text-xs text-slate-300 leading-relaxed text-center">
+                   <p className="text-xs text-slate-300 leading-relaxed text-left">
                      이 수치들은 <strong className="text-white">"번호들이 로또 용지 어디쯤에 모여 있게 할 것인가?"</strong>를 결정하는 필터입니다.<br/>
                      <span className="text-white">초보자:</span> 기본값(121~180, 80, 130) 유지를 권장합니다.<br/>
                      <span className="text-white">전략가:</span> 최근 큰 번호가 안 나왔다면 수치를 줄이고, 큰 번호가 나올 때가 되었다면 수치를 높여 공격적으로 조합하십시오.
@@ -539,8 +539,8 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
            <div className="glass p-8 sm:p-12 rounded-[3.5rem] border border-cyan-500/30 w-full max-w-3xl shadow-[0_0_100px_rgba(6,182,212,0.2)] space-y-8 relative max-h-[90vh] overflow-y-auto custom-scroll">
               <button onClick={() => setShowPatternGuide(false)} className="absolute top-8 right-8 text-slate-500 hover:text-white transition-colors text-2xl">✕</button>
               <div className="text-center space-y-2">
-                <h3 className="text-3xl font-mystic font-black text-cyan-400 tracking-widest uppercase">패턴 정합 시스템 가이드</h3>
-                <p className="text-[10px] text-slate-500 font-black tracking-[0.4em] uppercase">Pattern Conformity Logic Guide</p>
+                <h3 className="text-2xl sm:text-3xl font-mystic font-black text-cyan-400 tracking-tight sm:tracking-widest uppercase whitespace-nowrap">패턴 정합 시스템 가이드</h3>
+                <p className="text-[10px] text-slate-500 font-black tracking-[0.15em] sm:tracking-[0.4em] uppercase whitespace-nowrap">Pattern Conformity Logic Guide</p>
               </div>
               <div className="space-y-8">
                 <div className="p-8 bg-cyan-500/5 rounded-[2rem] border border-cyan-500/20 space-y-4">
@@ -612,8 +612,8 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
            <div className="glass p-8 sm:p-12 rounded-[3.5rem] border border-emerald-500/30 w-full max-w-3xl shadow-[0_0_100px_rgba(16,185,129,0.2)] space-y-8 relative max-h-[90vh] overflow-y-auto custom-scroll">
               <button onClick={() => setShowRegressionGuide(false)} className="absolute top-8 right-8 text-slate-500 hover:text-white transition-colors text-2xl">✕</button>
               <div className="text-center space-y-2">
-                <h3 className="text-3xl font-mystic font-black text-emerald-400 tracking-widest uppercase">회귀 분석 시스템 가이드</h3>
-                <p className="text-[10px] text-slate-500 font-black tracking-[0.4em] uppercase">Regression Analysis Logic Guide</p>
+                <h3 className="text-2xl sm:text-3xl font-mystic font-black text-emerald-400 tracking-tight sm:tracking-widest uppercase whitespace-nowrap">회귀 분석 시스템 가이드</h3>
+                <p className="text-[10px] text-slate-500 font-black tracking-[0.15em] sm:tracking-[0.4em] uppercase whitespace-nowrap">Regression Analysis Logic Guide</p>
               </div>
               <div className="space-y-8">
                 <div className="p-8 bg-emerald-500/5 rounded-[2rem] border border-emerald-500/20 space-y-4">
@@ -660,8 +660,8 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
            <div className="glass p-8 sm:p-12 rounded-[3.5rem] border border-indigo-500/30 w-full max-w-3xl shadow-[0_0_100px_rgba(99,102,241,0.2)] space-y-8 relative max-h-[90vh] overflow-y-auto custom-scroll">
               <button onClick={() => setShowEngineGuide(false)} className="absolute top-8 right-8 text-slate-500 hover:text-white transition-colors text-2xl">✕</button>
               <div className="text-center space-y-2">
-                <h3 className="text-3xl font-mystic font-black text-indigo-400 tracking-widest uppercase">연산 엔진 시스템 가이드</h3>
-                <p className="text-[10px] text-slate-500 font-black tracking-[0.4em] uppercase">Inference Engine Logic Guide</p>
+                <h3 className="text-2xl sm:text-3xl font-mystic font-black text-indigo-400 tracking-tight sm:tracking-widest uppercase whitespace-nowrap">연산 엔진 시스템 가이드</h3>
+                <p className="text-[10px] text-slate-500 font-black tracking-[0.15em] sm:tracking-[0.4em] uppercase whitespace-nowrap">Inference Engine Logic Guide</p>
               </div>
               <div className="space-y-6">
                 <div className="p-6 bg-indigo-500/5 border border-indigo-500/20 rounded-[2rem] space-y-3">
@@ -793,9 +793,9 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
       )}
 
       <div className="flex flex-col items-center space-y-4">
-        <div className="inline-flex items-center space-x-3 px-5 py-2 bg-cyan-500/10 border border-cyan-500/20 rounded-full">
-           <span className="w-2.5 h-2.5 bg-cyan-400 rounded-full animate-pulse shadow-[0_0_10px_#22d3ee]"></span>
-           <span className="text-[10px] font-black text-cyan-400 tracking-[0.5em] uppercase">Mystic Lotto Intellect Lab v6.0</span>
+        <div className="inline-flex items-center space-x-3 px-3 sm:px-5 py-2 bg-cyan-500/10 border border-cyan-500/20 rounded-full">
+           <span className="w-2.5 h-2.5 bg-cyan-400 rounded-full animate-pulse shadow-[0_0_10px_#22d3ee] shrink-0"></span>
+           <span className="text-[9px] sm:text-[10px] font-black text-cyan-400 tracking-[0.2em] sm:tracking-[0.5em] uppercase whitespace-nowrap">Mystic Lotto Intellect Lab v6.0</span>
         </div>
         <h2 className="text-3xl md:text-4xl font-mystic font-black text-white tracking-widest uppercase text-center drop-shadow-2xl">지성 분석 연구실</h2>
         <div className="flex space-x-6">
@@ -808,7 +808,7 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
 
       <div className="grid grid-cols-1 gap-10 items-start">
         <div className="space-y-8">
-          <div className="glass p-10 rounded-[4rem] border border-cyan-500/20 shadow-2xl space-y-10 relative overflow-hidden group">
+          <div className="glass px-[8px] py-10 sm:p-10 rounded-[4rem] border border-cyan-500/20 shadow-2xl space-y-10 relative overflow-hidden group -mx-[3px] sm:mx-0">
             <div className="flex bg-slate-950/80 p-1.5 rounded-[2rem] border border-white/5">
               {[
                 { id: 'sum', label: '합계', icon: 'Σ' },
@@ -819,15 +819,15 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                 <button 
                   key={tab.id}
                   onClick={() => setActiveSection(tab.id as any)}
-                  className={`flex-1 py-4 rounded-[1.5rem] text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center space-x-2 ${activeSection === tab.id ? 'bg-cyan-600 text-slate-950 shadow-[0_0_20px_rgba(6,182,212,0.3)]' : 'text-slate-500 hover:text-cyan-400'} ${config.algorithmMode === 'Wheeling' && tab.id !== 'algo' ? 'opacity-30' : ''}`}
+                  className={`flex-1 py-2 sm:py-4 rounded-[1.5rem] text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center space-x-2 ${activeSection === tab.id ? 'bg-cyan-600 text-slate-950 shadow-[0_0_20px_rgba(6,182,212,0.3)]' : 'text-slate-500 hover:text-cyan-400'} ${config.algorithmMode === 'Wheeling' && tab.id !== 'algo' ? 'opacity-30' : ''}`}
                 >
                   <span className="text-sm">{tab.icon}</span>
-                  <span className="hidden sm:inline">{tab.label}</span>
+                  <span>{tab.label}</span>
                 </button>
               ))}
             </div>
 
-            <div className="min-h-[420px] flex flex-col justify-center">
+            <div className="min-h-[260px] sm:min-h-[420px] flex flex-col justify-center">
               <div className="flex justify-between items-center mb-6 px-1">
                 <div className="flex flex-col space-y-1.5">
                   <button 
@@ -1080,22 +1080,22 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
               )}
 
               {activeSection === 'algo' && (
-                <div className="space-y-8 animate-in slide-in-from-right-8 duration-500 overflow-y-auto max-h-[400px] pr-2 custom-scroll">
-                  <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-3 sm:space-y-8 animate-in slide-in-from-right-8 duration-500 overflow-y-auto max-h-[300px] sm:max-h-[400px] pr-2 custom-scroll">
+                  <div className="grid grid-cols-2 gap-2 sm:gap-3">
                     {[
                       { id: 'Standard', name: 'Statistical Basic Filter', desc: '전통적 통계 확률에 기반한 기본 모델' },
-                      { id: 'BradfordLegacy', name: 'Bradford Legacy Engine', desc: '영국 브래드포드 대학 실화 그물망 전략', isRecommended: true },
+                      { id: 'BradfordLegacy', name: 'Bradford Legacy Engine', desc: '영국 브래드포드 대학의 그물망 전략', isRecommended: true },
                       { id: 'Bradford', name: 'Balanced Coverage Engine', desc: '균형 잡힌 데이터 커버리지 모델' },
                       { id: 'EntropyMax', name: 'Entropy Maximizer v2', desc: '무작위성 분포를 극대화하는 모델' },
                       { id: 'LowFrequency', name: 'Cold Number Recall', desc: '미출현 저빈도수 분석 모델' },
                       { id: 'Wheeling', name: 'Wheeling System', desc: '선택한 풀에서 페어 커버리지 극대화' }
                     ].map(algo => (
-                      <button key={algo.id} onClick={() => algo.id === 'Wheeling' && config.algorithmMode !== 'Wheeling' ? setShowWheelingNotice(true) : updateConfig('algorithmMode', algo.id as any)} className={`p-4 rounded-2xl border-2 text-left transition-all relative overflow-hidden ${config.algorithmMode === algo.id ? 'border-cyan-500 bg-cyan-500/10 shadow-lg' : 'border-slate-800 bg-slate-900/40 hover:border-slate-700'}`}>
+                      <button key={algo.id} onClick={() => algo.id === 'Wheeling' && config.algorithmMode !== 'Wheeling' ? setShowWheelingNotice(true) : updateConfig('algorithmMode', algo.id as any)} className={`px-3 py-3 sm:p-4 rounded-xl sm:rounded-2xl border-2 text-left transition-all relative overflow-hidden ${config.algorithmMode === algo.id ? 'border-cyan-500 bg-cyan-500/10 shadow-lg' : 'border-slate-800 bg-slate-900/40 hover:border-slate-700'}`}>
                         {algo.isRecommended && (
                           <div className="absolute top-0 right-0 bg-amber-500 text-slate-950 text-[8px] font-black px-2.5 py-0.5 rounded-bl-lg uppercase tracking-tighter z-10 animate-pulse border-b border-l border-amber-400/50">추천</div>
                         )}
-                        <p className={`text-[10px] font-black uppercase tracking-widest ${config.algorithmMode === algo.id ? 'text-white' : 'text-slate-400'}`}>{algo.name}</p>
-                        <p className="text-[9px] text-slate-500 font-medium leading-none mt-1">{algo.desc}</p>
+                        <p className={`text-[10px] font-black uppercase tracking-normal sm:tracking-widest whitespace-nowrap ${config.algorithmMode === algo.id ? 'text-white' : 'text-slate-400'}`}>{algo.name}</p>
+                        <p className="text-[9px] text-slate-500 font-medium leading-none mt-2">{algo.desc}</p>
                       </button>
                     ))}
                   </div>
@@ -1145,8 +1145,8 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                     <span className="text-[9px] text-slate-600 font-black uppercase tracking-widest">— 현재 모드에서 미적용</span>
                   )}
                 </div>
-                {/* 프리셋 버튼 — 엔진 모드와 완전히 독립 */}
-                <div className="relative flex items-center space-x-3 mr-8">
+                {/* 프리셋 버튼 — PC에서만 우측 배치 */}
+                <div className="relative hidden sm:flex items-center space-x-3 mr-8">
                   {([1, 2] as const).map(slot => (
                     <button
                       key={slot}
@@ -1171,7 +1171,6 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                       {slot}
                     </button>
                   ))}
-                  {/* ? 안내 버튼 — 2번 버튼 우상단 */}
                   <button
                     onClick={() => setInfoModal('preset')}
                     className="absolute -top-1.5 -right-6 w-3.5 h-3.5 rounded-full bg-slate-900 border border-slate-600 flex items-center justify-center text-[7px] font-black text-slate-400 hover:text-white hover:border-slate-400 transition-all"
@@ -1198,15 +1197,50 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                   </div>
                 </div>
               )}
+
+              {/* 프리셋 버튼 — 폰에서만 입력칸 아래 중앙 배치 */}
+              <div className="flex sm:hidden justify-center !mt-10">
+                <div className="relative flex items-center space-x-3">
+                  {([1, 2] as const).map(slot => (
+                    <button
+                      key={slot}
+                      onClick={() => {
+                        if (longPressTriggeredRef.current) return;
+                        hasPreset[slot] ? loadPreset(slot) : setConfirmSavePreset(slot);
+                      }}
+                      onContextMenu={e => { e.preventDefault(); if (!longPressTriggeredRef.current) setConfirmSavePreset(slot); }}
+                      onPointerDown={e => handlePointerDown(slot, e)}
+                      onPointerMove={handlePointerMove}
+                      onPointerUp={handlePointerUp}
+                      onPointerLeave={handlePointerUp}
+                      onPointerCancel={handlePointerUp}
+                      title={hasPreset[slot] ? `${slot}번 불러오기 / 길게 누르면 삭제` : `${slot}번 슬롯에 저장`}
+                      className={`w-10 h-10 rounded-xl text-sm font-black transition-all flex items-center justify-center
+                        ${activePreset === slot
+                          ? 'border border-cyan-400 bg-cyan-500 text-slate-950 shadow-[0_0_8px_rgba(6,182,212,0.6)]'
+                          : hasPreset[slot]
+                            ? 'border border-slate-500 bg-white/5 text-slate-400 hover:border-slate-300 hover:text-slate-200'
+                            : 'border border-dashed border-slate-500 bg-white/5 text-slate-400 hover:border-slate-300 hover:text-slate-200'}`}
+                    >
+                      {slot}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setInfoModal('preset')}
+                    className="absolute -top-1.5 -right-6 w-3.5 h-3.5 rounded-full bg-slate-900 border border-slate-600 flex items-center justify-center text-[7px] font-black text-slate-400 hover:text-white hover:border-slate-400 transition-all"
+                  >?</button>
+                </div>
+              </div>
             </div>
 
+            <div className="flex justify-center sm:block">
             <button
               onClick={handleGenerateClick}
               disabled={loading || (config.algorithmMode === 'Wheeling' && config.wheelingPool.length < 7)}
-              className="w-full py-7 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 disabled:cursor-not-allowed text-slate-950 disabled:text-slate-500 font-black rounded-[2rem] transition-all shadow-xl uppercase tracking-[0.4em] active:scale-95"
+              className="w-auto px-8 sm:w-full sm:px-0 py-4 sm:py-7 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 disabled:cursor-not-allowed text-slate-950 disabled:text-slate-500 font-black rounded-[2rem] transition-all shadow-xl uppercase tracking-[0.4em] active:scale-95"
             >
               {loading ? (
-                <span className="text-xl">연산 중...</span>
+                <span className="text-sm sm:text-xl">연산 중...</span>
               ) : config.algorithmMode === 'Wheeling' && config.wheelingPool.length < 7 ? (
                 <div className="flex flex-col items-center">
                   <span className="text-xl">풀 번호 미설정</span>
@@ -1214,11 +1248,12 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                 </div>
               ) : (
                 <div className="flex flex-col items-center">
-                  <span className="text-xl">정밀 분석 및 번호 추출</span>
+                  <span className="text-base sm:text-xl">정밀 분석 및 번호 추출</span>
                   <span className="text-xs opacity-60 mt-1 font-bold tracking-widest">(+1,000 루멘)</span>
                 </div>
               )}
             </button>
+            </div>
           </div>
         </div>
 
@@ -1250,7 +1285,7 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                 </div>
                 <div className="glass p-8 rounded-[3rem] border border-cyan-500/10 shadow-xl flex items-center justify-center gap-4 group hover:border-cyan-500/30 transition-all">
                   {result.numbers.map((num, i) => (
-                    <div key={i} className="w-14 h-14 rounded-2xl bg-slate-800 border border-white/5 flex items-center justify-center text-2xl font-black text-white shadow-lg group-hover:scale-105 transition-transform">
+                    <div key={i} className="w-10 h-10 sm:w-14 sm:h-14 rounded-full sm:rounded-2xl bg-slate-800 border border-white/5 flex items-center justify-center text-base sm:text-2xl font-black text-white shadow-lg group-hover:scale-105 transition-transform">
                       {num}
                     </div>
                   ))}
@@ -1335,7 +1370,7 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                   <div className="flex items-center space-x-4">
                     <div className="w-10 h-10 bg-indigo-500/20 rounded-xl flex items-center justify-center text-indigo-400 font-black text-sm">σ</div>
                     <div>
-                      <h3 className="text-xs font-black text-indigo-300 uppercase tracking-widest">Normal Distribution Z-Score</h3>
+                      <h3 className="text-xs font-black text-indigo-300 uppercase tracking-tight sm:tracking-widest whitespace-nowrap">Normal Distribution Z-Score</h3>
                       <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">합계의 통계적 위치 — 평균 138, 표준편차 24</p>
                     </div>
                   </div>
@@ -1379,7 +1414,7 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                   <div className="flex items-center space-x-4">
                     <div className="w-10 h-10 bg-emerald-500/20 rounded-xl flex items-center justify-center text-emerald-400 font-black text-sm">χ²</div>
                     <div>
-                      <h3 className="text-xs font-black text-emerald-300 uppercase tracking-widest">Chi-Squared Zone Distribution</h3>
+                      <h3 className="text-xs font-black text-emerald-300 uppercase tracking-tight sm:tracking-widest whitespace-nowrap">Chi-Squared Zone Distribution</h3>
                       <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">5개 구간 번호 분포 균일도 — 높을수록 고르게 퍼짐</p>
                     </div>
                   </div>
@@ -1496,8 +1531,8 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v20M2 12h20"/></svg>
                    </div>
                    <div>
-                      <h3 className="text-xs font-black text-cyan-400 tracking-[0.5em] uppercase">Mystic Lotto Lab Report</h3>
-                      <p className="text-[9px] text-slate-500 font-bold uppercase mt-1 italic">Protocol Compliance: AI Inference Engine</p>
+                      <h3 className="text-xs font-black text-cyan-400 tracking-[0.2em] sm:tracking-[0.5em] uppercase whitespace-nowrap">Mystic Lotto Lab Report</h3>
+                      <p className="text-[9px] text-slate-500 font-bold uppercase mt-1 italic tracking-tight sm:tracking-normal whitespace-nowrap">Protocol Compliance: AI Inference Engine</p>
                    </div>
                 </div>
                 <p className="text-[15px] text-cyan-50/70 leading-[2] italic font-medium whitespace-pre-wrap px-2 mb-12">

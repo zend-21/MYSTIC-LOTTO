@@ -275,13 +275,13 @@ const SacredOffering: React.FC<SacredOfferingProps> = ({ onOffer, level }) => {
               value={customAmount}
               onChange={(e) => setCustomAmount(e.target.value)}
               placeholder="직접입력 (나디르)"
-              className="w-full bg-transparent py-9 px-12 text-white text-center font-black text-3xl focus:outline-none placeholder:text-slate-800 placeholder:text-lg placeholder:font-black transition-all tabular-nums"
+              className="w-full bg-transparent py-5 sm:py-9 px-12 text-white text-center font-black text-xl sm:text-3xl focus:outline-none placeholder:text-slate-800 placeholder:text-base sm:placeholder:text-lg placeholder:font-black transition-all tabular-nums"
             />
             <button
               onClick={() => requestOffer(parseInt(customAmount))}
-              className="absolute right-5 top-1/2 -translate-y-1/2 w-16 h-16 bg-gradient-to-br from-amber-400 via-amber-600 to-amber-800 text-slate-950 rounded-2xl flex items-center justify-center font-black shadow-2xl hover:scale-105 active:scale-90 transition-all border-t border-white/40"
+              className="absolute right-5 top-1/2 -translate-y-1/2 w-11 h-11 sm:w-16 sm:h-16 bg-gradient-to-br from-amber-400 via-amber-600 to-amber-800 text-slate-950 rounded-xl sm:rounded-2xl flex items-center justify-center font-black shadow-2xl hover:scale-105 active:scale-90 transition-all border-t border-white/40"
             >
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+              <svg className="w-4 h-4 sm:w-7 sm:h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
             </button>
           </div>
         </div>

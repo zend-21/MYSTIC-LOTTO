@@ -129,12 +129,12 @@ const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({ currentUser, onComp
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-[#020617]">
+    <div className="min-h-screen flex items-center justify-center px-[15px] py-4 sm:p-4 bg-[#020617]">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_rgba(30,58,138,0.2),_transparent)] pointer-events-none"></div>
-      <div className="relative z-10 glass p-10 rounded-[3rem] w-full max-w-lg space-y-10 animate-in fade-in zoom-in duration-700 shadow-2xl border-white/5 text-center">
+      <div className="relative z-10 glass px-[15px] py-8 sm:p-10 rounded-[3rem] w-full max-w-lg space-y-10 animate-in fade-in zoom-in duration-700 shadow-2xl border-white/5 text-center">
         <div className="space-y-3 flex flex-col items-center">
           <img src="/s_mlotto_logo.png" alt="Mystic" className="w-24 h-24 object-contain drop-shadow-[0_0_24px_rgba(99,102,241,0.5)]" />
-          <h1 className="text-5xl font-mystic font-bold text-transparent bg-clip-text bg-gradient-to-b from-indigo-200 via-indigo-400 to-indigo-600 tracking-tighter uppercase">Mystic Lotto</h1>
+          <h1 className="text-5xl sm:text-5xl font-mystic font-bold text-transparent bg-clip-text bg-gradient-to-b from-indigo-200 via-indigo-400 to-indigo-600 tracking-tighter uppercase whitespace-nowrap" style={{fontSize: 'clamp(2rem, 11vw, 3rem)'}}>Mystic Lotto</h1>
           <p className="text-slate-500 text-[10px] font-black tracking-[0.6em] uppercase">Fate & Resonance</p>
         </div>
         <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl">
@@ -144,13 +144,13 @@ const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({ currentUser, onComp
           <div className="space-y-5">
             <div className="space-y-2">
               <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest px-1">Fortune Seeker (성함)</label>
-              <input type="text" required value={inputName} onChange={e => setInputName(e.target.value)} className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-white focus:outline-none focus:border-indigo-500 font-bold" placeholder="성함을 입력하세요" />
+              <input type="text" required value={inputName} onChange={e => setInputName(e.target.value)} className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-white focus:outline-none focus:border-indigo-500 font-bold" placeholder="본명을 입력하세요" />
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest px-1">Divine Energy (성별)</label>
               <div className="flex gap-4">
                 <button type="button" onClick={() => setInputGender('M')} className={`flex-1 py-4 rounded-2xl border-2 transition-all font-black text-sm ${inputGender === 'M' ? 'border-indigo-500 bg-indigo-500/10 text-white shadow-[0_0_20px_rgba(79,70,229,0.3)]' : 'border-slate-800 text-slate-500'}`}>남성 (陽)</button>
-                <button type="button" onClick={() => setInputGender('F')} className={`flex-1 py-4 rounded-2xl border-2 transition-all font-black text-sm ${inputGender === 'F' ? 'border-indigo-500 bg-indigo-500/10 text-white shadow-[0_0_20px_rgba(79,70,229,0.3)]' : 'border-slate-800 text-slate-500'}`}>여성 (음)</button>
+                <button type="button" onClick={() => setInputGender('F')} className={`flex-1 py-4 rounded-2xl border-2 transition-all font-black text-sm ${inputGender === 'F' ? 'border-indigo-500 bg-indigo-500/10 text-white shadow-[0_0_20px_rgba(79,70,229,0.3)]' : 'border-slate-800 text-slate-500'}`}>여성 (陰)</button>
               </div>
             </div>
             <div className="space-y-2">
@@ -185,10 +185,10 @@ const ProfileSetupForm: React.FC<ProfileSetupFormProps> = ({ currentUser, onComp
             <div className="space-y-2">
               <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest px-1">Birth Manifestation (생년월일시)</label>
               <div className="flex space-x-1.5 relative items-center">
-                <input ref={yearRef} type="text" placeholder="YYYY" maxLength={4} value={birthYear} onChange={handleYearChange} className="w-[22%] bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-white text-center focus:border-indigo-500 outline-none font-bold" />
-                <input ref={monthRef} type="text" placeholder="MM" maxLength={2} value={birthMonth} onChange={handleMonthChange} className="w-[16%] bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-white text-center focus:border-indigo-500 outline-none font-bold" />
-                <input ref={dayRef} type="text" placeholder="DD" maxLength={2} value={birthDay} onChange={handleDayChange} className="w-[16%] bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-white text-center focus:border-indigo-500 outline-none font-bold" />
-                <button type="button" onClick={() => { setShowTimePicker(!showTimePicker); setTimePickerStep('ampm'); }} className={`flex-1 min-w-0 bg-slate-950/50 border rounded-2xl p-4 text-white text-center font-bold flex items-center justify-center transition-all ${showTimePicker ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-800'}`}>
+                <input ref={yearRef} type="text" placeholder="YYYY" maxLength={4} value={birthYear} onChange={handleYearChange} className="w-[22%] bg-slate-950/50 border border-slate-800 rounded-2xl px-1 py-4 sm:p-4 text-white text-center focus:border-indigo-500 outline-none font-bold" />
+                <input ref={monthRef} type="text" placeholder="MM" maxLength={2} value={birthMonth} onChange={handleMonthChange} className="w-[16%] bg-slate-950/50 border border-slate-800 rounded-2xl px-1 py-4 sm:p-4 text-white text-center focus:border-indigo-500 outline-none font-bold" />
+                <input ref={dayRef} type="text" placeholder="DD" maxLength={2} value={birthDay} onChange={handleDayChange} className="w-[16%] bg-slate-950/50 border border-slate-800 rounded-2xl px-1 py-4 sm:p-4 text-white text-center focus:border-indigo-500 outline-none font-bold" />
+                <button type="button" onClick={() => { setShowTimePicker(!showTimePicker); setTimePickerStep('ampm'); }} className={`flex-1 min-w-0 bg-slate-950/50 border rounded-2xl px-1 py-4 sm:p-4 text-white text-center font-bold flex items-center justify-center transition-all ${showTimePicker ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-800'}`}>
                   <span className="text-[12px] whitespace-nowrap">{selectedAmPm} {selectedHour}:{selectedMinute} 🕒</span>
                 </button>
                 {showTimePicker && (

@@ -52,11 +52,12 @@ interface CelestialSquareProps {
   onGrowFromPost?: () => void;
   isAdmin?: boolean;
   lumenReceivedAt?: number;
+  lumenSenderName?: string;
 }
 
 const LIST_PAGE_SIZE = 30;
 
-const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdatePoints, onUpdateFavorites, onBack, onToast, onGrowFromPost, isAdmin, lumenReceivedAt = 0 }) => {
+const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdatePoints, onUpdateFavorites, onBack, onToast, onGrowFromPost, isAdmin, lumenReceivedAt = 0, lumenSenderName = '' }) => {
   const [view, setView] = useState<'lounge' | 'chat' | 'board' | 'post-detail' | 'post-edit'>('lounge');
   const [activeRoom, setActiveRoom] = useState<ChatRoom | null>(null);
 
@@ -96,6 +97,8 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
   const [giftTarget, setGiftTarget] = useState<{ uid: string; name: string; uniqueTag: string; level: number } | null>(null);
   const [giftAmount, setGiftAmount] = useState('100');
   const [isGiftSending, setIsGiftSending] = useState(false);
+  const [showGiftConfirm, setShowGiftConfirm] = useState(false);
+  const [giftValidError, setGiftValidError] = useState<string | null>(null);
 
   // 아이콘 선택 상태
   const [newRoomIcon, setNewRoomIcon] = useState('🪐');
@@ -484,13 +487,26 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
     }
   };
 
-  // 참여자 목록 → 루멘 선물
-  const handleGiftToParticipant = async () => {
-    if (isGiftSending || !giftTarget || !auth.currentUser) return;
+  // 참여자 목록 → 루멘 선물 사전 검사
+  const handleGiftPrecheck = () => {
+    if (!giftTarget) return;
     if (privilegedUids.has(giftTarget.uid)) { onToast("관리자에게는 루멘을 선물할 수 없습니다."); setGiftTarget(null); return; }
     const amount = parseInt(giftAmount);
-    if (isNaN(amount) || amount <= 0) { onToast("전수할 기운의 양이 올바르지 않습니다."); return; }
-    if (orb.points < amount) { onToast("보유하신 기운이 부족합니다."); return; }
+    if (isNaN(amount) || amount < 100 || amount % 100 !== 0) {
+      setGiftValidError('최소 100루멘 이상,\n100루멘 단위로만 입력할 수 있습니다.');
+      return;
+    }
+    if (orb.points < amount) {
+      setGiftValidError('보유하신 루멘이 부족합니다.');
+      return;
+    }
+    setShowGiftConfirm(true);
+  };
+
+  // 참여자 목록 → 루멘 선물 전송 (확인 모달에서 호출)
+  const handleGiftToParticipant = async () => {
+    if (isGiftSending || !giftTarget || !auth.currentUser) return;
+    const amount = parseInt(giftAmount);
     setIsGiftSending(true);
     const target = giftTarget;
     setGiftTarget(null);
@@ -573,22 +589,22 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           </button>
           <div className="flex flex-col">
-            <h2 className="text-xl font-mystic font-black text-white tracking-widest leading-none uppercase">
+            <h2 className="text-base sm:text-xl font-mystic font-black text-white tracking-tight sm:tracking-widest leading-none uppercase whitespace-nowrap">
               {view === 'lounge' ? 'Celestial Square' : view === 'chat' ? `${activeRoom?.icon ? activeRoom.icon + ' ' : ''}${activeRoom?.title} (${participants.length})` : 'Resonance Board'}
             </h2>
-            <div className="flex items-center space-x-3 mt-1.5">
-               <button onClick={() => setView('lounge')} className={`text-[9px] font-black uppercase tracking-widest ${view === 'lounge' || view === 'chat' ? 'text-indigo-400' : 'text-slate-500'}`}>Lounge</button>
-               <span className="text-slate-800 text-[8px]">/</span>
-               <button onClick={() => setView('board')} className={`text-[9px] font-black uppercase tracking-widest ${isBoardView ? 'text-emerald-400' : 'text-slate-500'}`}>회람판</button>
-               {(view === 'post-detail' || view === 'post-edit') && (
-                 <>
-                   <span className="text-slate-800 text-[8px]">/</span>
-                   <span className="text-[9px] font-black uppercase tracking-widest text-emerald-400">
-                     {view === 'post-edit' ? '편집' : '게시글'}
-                   </span>
-                 </>
-               )}
-            </div>
+            {(view === 'post-detail' || view === 'post-edit') ? (
+              <div className="flex items-center space-x-2 mt-1.5">
+                <button onClick={() => setView('board')} className="text-[9px] font-black text-slate-500 hover:text-emerald-400 transition-colors uppercase tracking-widest">회람판</button>
+                <span className="text-slate-700 text-[8px]">/</span>
+                <span className="text-[9px] font-black uppercase tracking-widest text-emerald-400">{view === 'post-edit' ? '편집' : '게시글'}</span>
+              </div>
+            ) : (
+              <p className="text-[9px] font-bold text-slate-500 mt-1.5 whitespace-nowrap">
+                {view === 'lounge' ? '행성을 탐색하고 여행자들과 공명하세요'
+                 : view === 'chat' ? `${participants.length}명과 공명 중`
+                 : '이야기를 올리고 공명을 나누는 공간'}
+              </p>
+            )}
           </div>
         </div>
         <div className="text-right flex items-center space-x-6">
@@ -644,16 +660,40 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
       </header>
 
       <main className="flex-1 min-h-0 overflow-hidden relative z-10 flex flex-col">
+        {/* 라운지 ↔ 회람판 탭 (채팅방 진입 시 숨김) */}
+        {view !== 'chat' && (
+          <div className="flex shrink-0 border-b border-white/5">
+            <button
+              onClick={() => setView('lounge')}
+              className={`flex-1 py-3 text-[11px] font-black tracking-widest transition-all border-b-2 ${
+                view === 'lounge' ? 'text-indigo-300 border-indigo-500 bg-indigo-500/5' : 'text-slate-600 border-transparent hover:text-slate-400'
+              }`}
+            >
+              라운지
+            </button>
+            <button
+              onClick={() => setView('board')}
+              className={`flex-1 py-3 text-[11px] font-black tracking-widest transition-all border-b-2 ${
+                isBoardView ? 'text-emerald-300 border-emerald-500 bg-emerald-500/5' : 'text-slate-600 border-transparent hover:text-slate-400'
+              }`}
+            >
+              회람판
+            </button>
+          </div>
+        )}
         {/* 라운지 (방 목록) */}
         {view === 'lounge' && (
           <div className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 custom-scroll">
             <div className="max-w-5xl mx-auto space-y-8">
               <div className="flex justify-between items-end border-b border-white/5 pb-6">
                 <div className="space-y-1">
-                   <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.4em]">Permanent Cosmic Hubs</h3>
+                   <h3 className="text-lg font-black text-slate-500 uppercase tracking-tight sm:tracking-[0.4em] whitespace-nowrap">Permanent Cosmic Hubs</h3>
                    <p className="text-[10px] text-indigo-400 italic font-medium">개설된 행성은 소멸 전까지는 유지됩니다.</p>
                 </div>
-                <button onClick={() => setIsCreatingRoom(true)} className="px-8 py-3.5 bg-indigo-600 text-white font-black rounded-2xl text-[10px] uppercase tracking-widest shadow-xl shadow-indigo-600/20 hover:bg-indigo-500 transition-all active:scale-95">행성 창조하기 (1,000 L)</button>
+                <button onClick={() => setIsCreatingRoom(true)} className="px-5 sm:px-8 py-2.5 sm:py-3.5 bg-indigo-600 text-white font-black rounded-xl sm:rounded-2xl text-[11px] sm:text-[10px] uppercase tracking-tight sm:tracking-widest shadow-xl shadow-indigo-600/20 hover:bg-indigo-500 transition-all active:scale-95 shrink-0">
+                  <span className="sm:hidden">행성 창조하기<br />(1,000 L)</span>
+                  <span className="hidden sm:inline">행성 창조하기 (1,000 L)</span>
+                </button>
               </div>
 
               {/* 정렬 바 */}
@@ -806,8 +846,9 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
             activeRoom={activeRoom}
             orb={orb}
             onToast={onToast}
-            participants={participants.map(p => p.uid)}
+            participants={participants.map(p => ({ uid: p.uid, name: p.name || p.uniqueTag || '익명', uniqueTag: p.uniqueTag || '' }))}
             lumenReceivedAt={lumenReceivedAt}
+            lumenSenderName={lumenSenderName}
           />
         )}
       </main>
@@ -983,22 +1024,60 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
         <div className="fixed inset-0 z-[11000] flex items-center justify-center px-6">
           <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setGiftTarget(null)}></div>
           <div className="relative glass p-10 rounded-[3rem] border border-yellow-500/20 w-full max-w-sm text-center animate-in zoom-in-95 duration-300">
+            <button onClick={() => setGiftTarget(null)} className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/15 text-slate-400 hover:text-white transition-all text-lg">✕</button>
             <div className="text-4xl mb-4">🎁</div>
-            <h3 className="text-xl font-mystic font-black text-yellow-500 mb-1 uppercase tracking-widest">Transmit Essence</h3>
-            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-6 italic">
-              <span className="text-indigo-400">LV.{giftTarget.level}</span> {giftTarget.name}님에게 기운을 전수합니다.
+            <h3 className="text-base sm:text-xl font-mystic font-black text-yellow-500 mb-1 uppercase tracking-tight sm:tracking-widest whitespace-nowrap">Transmit Essence</h3>
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-3 italic">
+              <span className="text-indigo-400">LV.{giftTarget.level}</span> {giftTarget.name}({giftTarget.uniqueTag})님에게 루멘을 선물합니다.
+            </p>
+            <p className="text-[11px] text-slate-400 font-bold mb-6">
+              보유 루멘 <span className="text-yellow-400 font-black">{orb.points.toLocaleString()} L</span>
             </p>
             <div className="space-y-4">
-              <div className="flex items-center bg-slate-950/50 border border-slate-800 rounded-2xl p-2">
-                <button onClick={() => setGiftAmount(v => String(Math.max(100, parseInt(v) - 100)))} className="w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center text-slate-400 hover:text-white text-xl font-black">−</button>
-                <input type="number" value={giftAmount} onChange={e => setGiftAmount(e.target.value)} className="flex-1 bg-transparent text-center font-black text-2xl text-white outline-none tabular-nums" />
-                <button onClick={() => setGiftAmount(v => String(parseInt(v) + 100))} className="w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center text-slate-400 hover:text-white text-xl font-black">+</button>
+              <div>
+                <div className="flex items-center bg-slate-950/50 border border-slate-800 rounded-2xl p-2">
+                  <button onClick={() => setGiftAmount(v => { const cur = parseInt(v); return isNaN(cur) ? v : String(Math.max(100, cur % 100 === 0 ? cur - 100 : Math.floor(cur / 100) * 100)); })} className="w-12 h-12 shrink-0 bg-white/5 rounded-xl flex items-center justify-center text-slate-400 hover:text-white text-xl font-black">−</button>
+                  <input type="number" value={giftAmount} onChange={e => setGiftAmount(e.target.value)} className="flex-1 min-w-0 bg-transparent text-center font-black text-2xl text-white outline-none tabular-nums" />
+                  <button onClick={() => setGiftAmount(v => { const cur = parseInt(v); return String(isNaN(cur) ? 100 : cur % 100 === 0 ? cur + 100 : Math.ceil(cur / 100) * 100); })} className="w-12 h-12 shrink-0 bg-white/5 rounded-xl flex items-center justify-center text-slate-400 hover:text-white text-xl font-black">+</button>
+                </div>
+                <p className="text-right text-[10px] text-slate-600 font-bold mt-1.5">(최소단위: 100루멘)</p>
               </div>
-              <button onClick={handleGiftToParticipant} disabled={isGiftSending} className="w-full py-5 bg-yellow-600 text-slate-950 font-black rounded-2xl shadow-xl uppercase tracking-widest text-sm disabled:opacity-50">
-                루멘 전수하기
+              <button onClick={handleGiftPrecheck} disabled={isGiftSending} className="w-full py-5 bg-yellow-600 text-slate-950 font-black rounded-2xl shadow-xl uppercase tracking-widest text-sm disabled:opacity-50">
+                루멘 선물하기
               </button>
               <button onClick={() => setGiftTarget(null)} className="w-full py-3 bg-white/5 text-slate-500 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-white/10">취소</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 루멘 선물 확인 모달 ── */}
+      {showGiftConfirm && giftTarget && (
+        <div className="fixed inset-0 z-[11500] flex items-center justify-center px-8">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowGiftConfirm(false)} />
+          <div className="relative glass p-8 rounded-[2.5rem] border border-yellow-500/20 w-full max-w-xs text-center animate-in zoom-in-95 duration-200">
+            <div className="text-3xl mb-4">🎁</div>
+            <p className="text-sm font-black text-white leading-relaxed mb-2">
+              {giftTarget.name}({giftTarget.uniqueTag})님에게
+            </p>
+            <p className="text-xl font-black text-yellow-400 mb-6">{parseInt(giftAmount).toLocaleString()} 루멘</p>
+            <p className="text-xs text-slate-500 font-bold mb-8">을 선물하시겠습니까?</p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowGiftConfirm(false)} className="flex-1 py-3.5 bg-white/5 text-slate-400 font-black rounded-2xl text-sm hover:bg-white/10 transition-all">취소</button>
+              <button onClick={() => { setShowGiftConfirm(false); handleGiftToParticipant(); }} className="flex-1 py-3.5 bg-yellow-600 text-slate-950 font-black rounded-2xl text-sm hover:brightness-110 transition-all">선물하기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 루멘 선물 에러 모달 ── */}
+      {giftValidError && (
+        <div className="fixed inset-0 z-[11500] flex items-center justify-center px-8">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setGiftValidError(null)} />
+          <div className="relative glass p-8 rounded-[2.5rem] border border-rose-500/20 w-full max-w-xs text-center animate-in zoom-in-95 duration-200">
+            <div className="text-3xl mb-4">⚠️</div>
+            <p className="text-sm font-black text-white leading-relaxed whitespace-pre-line mb-6">{giftValidError}</p>
+            <button onClick={() => setGiftValidError(null)} className="w-full py-3.5 bg-rose-600/80 text-white font-black rounded-2xl text-sm uppercase tracking-widest hover:bg-rose-500 transition-all">확인</button>
           </div>
         </div>
       )}
@@ -1039,9 +1118,9 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
 
       {/* 아이콘 피커 모달 */}
       {showIconPicker !== null && (
-        <div className="fixed inset-0 z-[11000] flex items-end sm:items-center justify-center">
+        <div className="fixed inset-0 z-[11000] flex items-start sm:items-center justify-center">
           <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowIconPicker(null)}></div>
-          <div className="relative w-full max-w-lg bg-slate-900 border border-indigo-500/20 rounded-t-[3rem] sm:rounded-[3rem] shadow-2xl animate-in slide-in-from-bottom-full sm:zoom-in-95 duration-300 flex flex-col max-h-[80vh]">
+          <div className="relative w-full max-w-lg bg-slate-900 border border-indigo-500/20 rounded-b-[3rem] sm:rounded-[3rem] shadow-2xl animate-in slide-in-from-top-full sm:zoom-in-95 duration-300 flex flex-col max-h-[80vh]">
             <div className="p-6 border-b border-white/5 flex items-center justify-between shrink-0">
               <div>
                 <h3 className="text-sm font-black text-white uppercase tracking-widest">아이콘 선택</h3>

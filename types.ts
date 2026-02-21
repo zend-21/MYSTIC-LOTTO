@@ -132,6 +132,7 @@ export interface FixedFortuneResult extends FortuneResult {
   destinyDescription: string; 
   monthlyFlow: MonthlyEnergy[];
   luckyColor: string;
+  luckyColorDescription?: string;
   planningStrategy: string;
   bestMonths: string;
   worstMonths: string;
@@ -162,9 +163,10 @@ export interface OrbDecoration {
 
 export interface AnnualDestiny {
   year: number;
-  numbers: number[]; // 연간 수호 번호 (1-2개)
+  numbers: number[]; // 연간 수호 번호 4개 (1-45, 사주/수비학/타로/점성술 각 1개)
   reason: string; // 전체 종합 운세
   luckyColor: string;
+  luckyColorDescription?: string;
   planningStrategy: string;
   bestMonths: string;
   worstMonths: string;
@@ -207,6 +209,7 @@ export interface ChatMessage {
   id: string;
   userId: string;
   userName: string;
+  userUniqueTag?: string;
   userLevel: number;
   message: string;
   timestamp: number;

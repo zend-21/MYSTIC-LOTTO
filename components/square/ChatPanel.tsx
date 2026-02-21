@@ -5,11 +5,12 @@ import { db, auth } from '../../services/firebase';
 import {
   collection, query, onSnapshot, addDoc,
   orderBy, limit, getDocs, startAfter, QueryDocumentSnapshot,
-  doc, updateDoc, arrayUnion
+  doc, updateDoc, arrayUnion, setDoc, getDoc
 } from 'firebase/firestore';
 import { spendPoints } from '../../services/geminiService';
 
 const MSG_PAGE_SIZE = 50;
+const MSG_MAX_LENGTH = 300;
 
 // ── 이모지 목록 ──────────────────────────────────────────────────────────────
 const EMOJI_LIST = [
@@ -21,7 +22,7 @@ const EMOJI_LIST = [
 ];
 
 // ── 매크로 타입 ──────────────────────────────────────────────────────────────
-type AutoTrigger = '' | 'i_enter' | 'someone_enters' | 'someone_leaves' | 'idle_3min' | 'received_lumen';
+type AutoTrigger = '' | 'i_enter' | 'someone_enters' | 'someone_leaves' | 'gift_lumen' | 'idle_3min' | 'received_lumen';
 
 interface AutoMacro {
   text: string;
@@ -33,11 +34,19 @@ const AUTO_TRIGGER_LABELS: Record<AutoTrigger, string> = {
   i_enter: '내가 입장할 때',
   someone_enters: '누군가 입장할 때',
   someone_leaves: '누군가 퇴장할 때',
+  gift_lumen: '루멘 선물할 때',
   idle_3min: '3분간 채팅 없을 때',
   received_lumen: '루멘 선물받을 때',
 };
 
-const ALL_TRIGGERS: AutoTrigger[] = ['', 'i_enter', 'someone_enters', 'someone_leaves', 'idle_3min', 'received_lumen'];
+// 자동 매크로 슬롯별 고정 트리거 (순서 변경 불가)
+const FIXED_AUTO_TRIGGERS: AutoTrigger[] = [
+  'i_enter',        // #1 본인 입장 시
+  'someone_enters', // #2 타인 입장 시
+  'idle_3min',      // #3 짤림방지 (3분 무입력)
+  'gift_lumen',     // #4 루멘 선물할 때
+  'received_lumen', // #5 루멘 선물받을 때
+];
 
 const MACRO_KEY = 'mystic_macros';
 
@@ -47,15 +56,19 @@ function loadMacros(): { manual: string[]; auto: AutoMacro[] } {
     if (raw) {
       const p = JSON.parse(raw);
       const manual: string[] = Array.isArray(p.manual) ? p.manual : [];
-      const auto: AutoMacro[] = Array.isArray(p.auto) ? p.auto : [];
-      while (manual.length < 10) manual.push('');
-      while (auto.length < 10) auto.push({ text: '', trigger: '' });
-      return { manual: manual.slice(0, 10), auto: (auto.slice(0, 10) as AutoMacro[]) };
+      const savedAuto: AutoMacro[] = Array.isArray(p.auto) ? p.auto : [];
+      while (manual.length < 7) manual.push('');
+      // 자동 슬롯은 항상 고정 트리거 5개, 저장된 텍스트만 복원
+      const auto = FIXED_AUTO_TRIGGERS.map((trigger, i) => ({
+        text: savedAuto[i]?.text || '',
+        trigger,
+      }));
+      return { manual: manual.slice(0, 7), auto };
     }
   } catch {}
   return {
-    manual: Array(10).fill('') as string[],
-    auto: Array.from({ length: 10 }, () => ({ text: '', trigger: '' as AutoTrigger })),
+    manual: Array(7).fill('') as string[],
+    auto: FIXED_AUTO_TRIGGERS.map(trigger => ({ text: '', trigger })),
   };
 }
 
@@ -68,13 +81,14 @@ interface ChatPanelProps {
   activeRoom: ChatRoom;
   orb: OrbState;
   onToast: (msg: string) => void;
-  participants?: string[];
+  participants?: { uid: string; name: string; uniqueTag?: string }[];
   lumenReceivedAt?: number;
+  lumenSenderName?: string;
 }
 
 // ── 컴포넌트 ──────────────────────────────────────────────────────────────────
 const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
-  ({ activeRoom, orb, onToast, participants = [], lumenReceivedAt = 0 }, ref) => {
+  ({ activeRoom, orb, onToast, participants = [], lumenReceivedAt = 0, lumenSenderName = '' }, ref) => { // participants: {uid, name}[]
 
   // ── 기존 state ───────────────────────────────────────────────────────────
   const [currentTime, setCurrentTime]             = useState(Date.now());
@@ -87,6 +101,8 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
   const [showGiftModal, setShowGiftModal]         = useState<ChatMessage | null>(null);
   const [giftAmount, setGiftAmount]               = useState('100');
   const [isSending, setIsSending]                 = useState(false);
+  const [giftValidError, setGiftValidError]       = useState<string | null>(null);
+  const [showGiftConfirm, setShowGiftConfirm]     = useState(false);
 
   // 스팸 방지
   const [mutedUntil, setMutedUntil]   = useState(0);
@@ -113,8 +129,9 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
   const activeRoomIdRef        = useRef(activeRoom.id);
   const currentDisplayNameRef  = useRef('');
   const orbLevelRef            = useRef(orb.level);
-  const prevParticipantsRef    = useRef<string[]>([]);
+  const prevParticipantsRef    = useRef<{ uid: string; name: string }[]>([]);
   const isInitialPartRef       = useRef(true);
+  const partGracePeriodRef     = useRef(0); // 방 입장 후 유예 기간 (ms timestamp)
   const lastMyMsgTimeRef       = useRef<number>(Date.now());
   const prevLumenRef           = useRef<number>(lumenReceivedAt);
   const idleTimerRef           = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -151,13 +168,16 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
   useEffect(() => { orbLevelRef.current            = orb.level; },          [orb.level]);
 
   // ── 자동 매크로 전송 (stable — 모든 변경값을 refs로 접근) ────────────────
-  const sendAutoMacro = useCallback(async (trigger: AutoTrigger) => {
+  // nickname: ## 변수 치환 시 대입할 상대방 닉네임
+  const sendAutoMacro = useCallback(async (trigger: AutoTrigger, nickname?: string) => {
     if (!auth.currentUser) return;
     const macro = autoMacrosRef.current.find(m => m.trigger === trigger && m.text.trim());
     if (!macro) return;
     if (mutedUntilRef.current > Date.now()) return;
     const now  = Date.now();
-    const text = macro.text.trim();
+    let text = macro.text.trim();
+    // nickname 있으면 ## 대체, 없으면 제거 (##이 그대로 전송되지 않도록)
+    text = nickname ? text.replace(/##/g, nickname) : text.replace(/##/g, '');
     try {
       await addDoc(
         collection(db, 'square', 'rooms', 'list', activeRoomIdRef.current, 'messages'),
@@ -196,6 +216,7 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     setShowEmojiPicker(false);
     isInitialPartRef.current = true;
     prevParticipantsRef.current = [];
+    partGracePeriodRef.current = Date.now() + 3000; // 입장 후 3초간 기존 참여자 인식 유예
 
     // ① 나에게만 보이는 로컬 입장 메시지 (Firestore 미기록)
     const roomLabel = `${activeRoom.icon ? activeRoom.icon + ' ' : ''}${activeRoom.title}`;
@@ -258,17 +279,16 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
   // ── participants 변화 감지 ────────────────────────────────────────────────
   useEffect(() => {
-    if (isInitialPartRef.current) {
+    // 방 입장 직후 유예 기간: 기존 참여자를 베이스라인으로만 저장하고 매크로 발동 안 함
+    if (isInitialPartRef.current || Date.now() < partGracePeriodRef.current) {
       prevParticipantsRef.current = [...participants];
       isInitialPartRef.current = false;
       return;
     }
     const prev  = prevParticipantsRef.current;
     const myUid = auth.currentUser?.uid;
-    const entered = participants.filter(uid => !prev.includes(uid) && uid !== myUid);
-    const left    = prev.filter(uid => !participants.includes(uid));
-    if (entered.length > 0) sendAutoMacro('someone_enters');
-    if (left.length > 0)    sendAutoMacro('someone_leaves');
+    const entered = participants.filter(p => !prev.some(pp => pp.uid === p.uid) && p.uid !== myUid);
+    if (entered.length > 0) sendAutoMacro('someone_enters', entered[0].name);
     prevParticipantsRef.current = [...participants];
   }, [participants, sendAutoMacro]);
 
@@ -276,14 +296,38 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
   useEffect(() => {
     if (lumenReceivedAt > 0 && lumenReceivedAt !== prevLumenRef.current) {
       prevLumenRef.current = lumenReceivedAt;
-      sendAutoMacro('received_lumen');
+      sendAutoMacro('received_lumen', lumenSenderName || undefined);
     }
-  }, [lumenReceivedAt, sendAutoMacro]);
+  }, [lumenReceivedAt, lumenSenderName, sendAutoMacro]);
 
-  // ── 매크로 localStorage 저장 ─────────────────────────────────────────────
+  // ── 매크로 localStorage 동기화 (state 변경 시마다) ──────────────────────
   useEffect(() => {
     localStorage.setItem(MACRO_KEY, JSON.stringify({ manual: manualMacros, auto: autoMacros }));
   }, [manualMacros, autoMacros]);
+
+  // ── 마운트 시 Firestore에서 매크로 로드 (localStorage 캐시 위에 덮어씀) ─
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    let mounted = true;
+    const macroDocRef = doc(db, 'users', auth.currentUser.uid, 'settings', 'macros');
+    getDoc(macroDocRef).then(snap => {
+      if (!mounted || !snap.exists()) return;
+      const data = snap.data();
+      const manual: string[] = Array.isArray(data.manual) ? data.manual : [];
+      const savedAuto: AutoMacro[] = Array.isArray(data.auto) ? data.auto : [];
+      while (manual.length < 7) manual.push('');
+      const auto = FIXED_AUTO_TRIGGERS.map((trigger, i) => ({
+        text: savedAuto[i]?.text || '',
+        trigger,
+      }));
+      const normalized = { manual: manual.slice(0, 7), auto };
+      setManualMacros(normalized.manual);
+      setAutoMacros(normalized.auto);
+      // localStorage도 최신화 (Firestore가 소스 of truth)
+      localStorage.setItem(MACRO_KEY, JSON.stringify(normalized));
+    }).catch(() => {});
+    return () => { mounted = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── 더 불러오기 ──────────────────────────────────────────────────────────
   const loadMoreMessages = async () => {
@@ -360,6 +404,7 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       await addDoc(collection(db, 'square', 'rooms', 'list', activeRoom.id, 'messages'), {
         userId: auth.currentUser.uid,
         userName: currentDisplayName,
+        userUniqueTag: orb.uniqueTag || '',
         userLevel: orb.level,
         message: text,
         timestamp: now,
@@ -372,12 +417,24 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     }
   };
 
-  // ── 루멘 선물 전송 ───────────────────────────────────────────────────────
+  // ── 루멘 선물 사전 검사 (버튼 클릭 시) ──────────────────────────────────
+  const handleGiftPrecheck = () => {
+    const amount = parseInt(giftAmount);
+    if (isNaN(amount) || amount < 100 || amount % 100 !== 0) {
+      setGiftValidError('최소 100루멘 이상,\n100루멘 단위로만 입력할 수 있습니다.');
+      return;
+    }
+    if (orb.points < amount) {
+      setGiftValidError('보유하신 루멘이 부족합니다.');
+      return;
+    }
+    setShowGiftConfirm(true);
+  };
+
+  // ── 루멘 선물 전송 (확인 모달에서 호출) ──────────────────────────────────
   const handleGiftLumen = async () => {
     if (isSending) return;
     const amount = parseInt(giftAmount);
-    if (isNaN(amount) || amount <= 0) { onToast('전수할 기운의 양이 올바르지 않습니다.'); return; }
-    if (orb.points < amount)           { onToast('보유하신 기운이 부족합니다.'); return; }
     if (!showGiftModal || showGiftModal.userId === 'system' || !auth.currentUser) return;
     const target = showGiftModal;
     setIsSending(true);
@@ -400,6 +457,7 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         })
       });
       onToast(`${target.userName}님에게 ${amount.toLocaleString()} 루멘을 전수했습니다.`);
+      sendAutoMacro('gift_lumen', target.userName);
     } catch {
       onToast('선물 전송에 실패했습니다.');
     } finally {
@@ -421,19 +479,26 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 ${d.getHours()}시 ${d.getMinutes()}분`;
   };
 
-  // ── 매크로 슬롯 편집 저장 ────────────────────────────────────────────────
+  // ── 매크로 슬롯 편집 저장 (Firestore + localStorage) ────────────────────
   const saveEditingSlot = () => {
     if (editingSlot === null) return;
+    let newManual = [...manualMacros];
+    let newAuto   = [...autoMacros];
     if (macroTab === 'manual') {
-      setManualMacros(prev => { const n = [...prev]; n[editingSlot] = editText; return n; });
+      newManual[editingSlot] = editText;
+      setManualMacros(newManual);
     } else {
-      setAutoMacros(prev => {
-        const n = [...prev];
-        n[editingSlot] = { text: editText, trigger: editTrigger };
-        return n;
-      });
+      newAuto[editingSlot] = { text: editText, trigger: FIXED_AUTO_TRIGGERS[editingSlot] };
+      setAutoMacros(newAuto);
     }
     setEditingSlot(null);
+    // Firestore에 저장 (로그인 상태일 때만)
+    if (auth.currentUser) {
+      const macroDocRef = doc(db, 'users', auth.currentUser.uid, 'settings', 'macros');
+      setDoc(macroDocRef, { manual: newManual, auto: newAuto })
+        .then(() => onToast('매크로가 저장되었습니다.'))
+        .catch(() => onToast('매크로 저장에 실패했습니다. 다시 시도해 주세요.'));
+    }
   };
 
   // ── 수동 매크로 클릭 → 입력창에 삽입 ────────────────────────────────────
@@ -497,6 +562,7 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                 <p className="flex"><span className="shrink-0 mr-1.5">•</span><span>전화번호·계좌번호 등 개인정보를 요구받더라도 절대 응하지 마세요. 운영진은 어떠한 경우에도 개인정보를 요청하지 않습니다.</span></p>
                 <p className="flex"><span className="shrink-0 mr-1.5">•</span><span>욕설·비방·도배·음란성 발언은 서비스 이용 제한으로 이어질 수 있습니다.</span></p>
                 <p className="flex"><span className="shrink-0 mr-1.5">•</span><span>타인의 명예 훼손, 사기·거래 유도 행위는 관계 법령에 따라 처리됩니다.</span></p>
+                <p className="flex"><span className="shrink-0 mr-1.5">•</span><span>상대의 구슬을 탭하거나 참여자 목록 창에서 대상을 선택해 루멘을 선물할 수 있습니다.</span></p>
                 <p className="flex text-slate-300 font-semibold"><span className="shrink-0 mr-1.5">•</span><span>서로를 존중하는 품격 있는 대화 문화를 함께 만들어 주세요.</span></p>
               </div>
             </div>
@@ -525,7 +591,6 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                   <div className="relative group cursor-pointer" onClick={() => setShowGiftModal(msg)}>
                     <OrbVisual level={msg.userLevel} className="w-10 h-10 border border-white/10" />
                     <div className="absolute -top-1 -right-1 bg-indigo-600 text-[8px] font-black px-1.5 py-0.5 rounded shadow-lg">LV.{msg.userLevel}</div>
-                    <div className="absolute inset-0 bg-yellow-500/80 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-slate-950 font-black text-[8px]">GIFT</div>
                   </div>
                 )}
                 <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[70%]`}>
@@ -577,15 +642,30 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               😊
             </button>
 
-            {/* 텍스트 입력 */}
-            <input
-              type="text"
-              value={inputMsg}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputMsg(e.target.value)}
-              onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && sendMessage()}
-              placeholder={spamWarnings > 0 ? `⚠️ 경고 ${spamWarnings}/3 — 반복 시 채팅 금지` : '운명의 메시지를 입력하세요...'}
-              className={`flex-1 bg-white/5 border rounded-xl px-4 py-3 text-sm focus:outline-none transition-all text-white ${spamWarnings > 0 ? 'border-yellow-500/40 placeholder-yellow-600' : 'border-white/10 focus:border-indigo-500'}`}
-            />
+            {/* 텍스트 입력 + 글자수 카운터 */}
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                value={inputMsg}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputMsg(e.target.value.slice(0, MSG_MAX_LENGTH))}
+                onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && sendMessage()}
+                placeholder={spamWarnings > 0 ? `⚠️ 경고 ${spamWarnings}/3 — 반복 시 채팅 금지` : '운명의 메시지를 입력하세요...'}
+                className={`w-full bg-white/5 border rounded-xl px-4 py-3 text-sm focus:outline-none transition-all text-white ${inputMsg.length > 0 ? 'pr-14' : ''} ${
+                  spamWarnings > 0 ? 'border-yellow-500/40 placeholder-yellow-600'
+                  : inputMsg.length >= MSG_MAX_LENGTH ? 'border-rose-500/50'
+                  : 'border-white/10 focus:border-indigo-500'
+                }`}
+              />
+              {inputMsg.length > 0 && (
+                <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono tabular-nums pointer-events-none ${
+                  inputMsg.length >= MSG_MAX_LENGTH ? 'text-rose-400 font-bold'
+                  : inputMsg.length >= 250 ? 'text-yellow-400'
+                  : 'text-slate-600'
+                }`}>
+                  {inputMsg.length}/{MSG_MAX_LENGTH}
+                </span>
+              )}
+            </div>
 
             {/* 전송 버튼 */}
             <button
@@ -616,12 +696,12 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
       {/* ── 매크로 모달 (fixed overlay) ── */}
       {showMacroModal && (
-        <div className="fixed inset-0 z-[5000] flex items-end">
+        <div className="fixed inset-0 z-[5000] flex items-center justify-center px-4">
           <div
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
             onClick={() => { setShowMacroModal(false); setIsMacroEditMode(false); setEditingSlot(null); }}
           />
-          <div className="relative w-full max-w-[640px] mx-auto bg-slate-900 border border-white/10 border-b-0 rounded-t-3xl shadow-2xl overflow-hidden">
+          <div className="relative w-full max-w-[640px] mx-auto bg-slate-900 border border-white/10 rounded-3xl shadow-2xl overflow-hidden">
 
             {/* 헤더 */}
             <div className="flex items-center justify-between px-6 pt-5 pb-3">
@@ -657,8 +737,8 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               ))}
             </div>
 
-            {/* 매크로 그리드 */}
-            <div className="px-6 grid grid-cols-2 gap-2 mb-3">
+            {/* 매크로 목록 — 한 줄 1개 */}
+            <div className="px-6 space-y-2 mb-3 max-h-[55vh] overflow-y-auto custom-scroll">
               {macroTab === 'manual'
                 ? manualMacros.map((text, i) => (
                     <button
@@ -667,7 +747,7 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         if (isMacroEditMode) { setEditingSlot(i); setEditText(text); }
                         else applyManualMacro(text);
                       }}
-                      className={`min-h-[52px] px-3 py-2 rounded-xl border text-left transition-colors ${
+                      className={`w-full px-4 py-3 rounded-xl border text-left transition-colors flex items-center gap-3 ${
                         editingSlot === i
                           ? 'border-indigo-500 bg-indigo-600/20'
                           : text
@@ -677,38 +757,36 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                               : 'border-dashed border-white/8 cursor-default'
                       }`}
                     >
-                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-0.5">
-                        #{i + 1}{isMacroEditMode ? ' · 편집' : ''}
-                      </p>
-                      <p className={`text-xs leading-snug truncate ${text ? 'text-slate-200' : 'text-slate-600 italic'}`}>
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest shrink-0">#{i + 1}</span>
+                      <span className={`text-xs leading-snug truncate ${text ? 'text-slate-200' : 'text-slate-600 italic'}`}>
                         {text || '빈 슬롯'}
-                      </p>
+                      </span>
                     </button>
                   ))
                 : autoMacros.map((macro, i) => (
                     <button
                       key={i}
                       onClick={() => {
-                        if (isMacroEditMode) { setEditingSlot(i); setEditText(macro.text); setEditTrigger(macro.trigger); }
+                        if (isMacroEditMode) { setEditingSlot(i); setEditText(macro.text); }
                       }}
-                      className={`min-h-[52px] px-3 py-2 rounded-xl border text-left transition-colors ${
+                      className={`w-full px-4 py-3 rounded-xl border text-left transition-colors ${
                         editingSlot === i
                           ? 'border-indigo-500 bg-indigo-600/20'
                           : macro.text
-                            ? 'border-white/10 bg-white/5'
-                            : 'border-dashed border-white/10'
-                      } ${!isMacroEditMode ? 'cursor-default' : 'hover:bg-white/10'}`}
+                            ? 'border-white/10 bg-white/5 hover:bg-white/10'
+                            : isMacroEditMode
+                              ? 'border-dashed border-white/10 hover:border-white/30'
+                              : 'border-dashed border-white/8 cursor-default'
+                      }`}
                     >
-                      <div className="flex items-center gap-1 mb-0.5 flex-wrap">
-                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">#{i + 1}</p>
-                        {macro.trigger && (
-                          <span className="text-[9px] bg-purple-600/30 text-purple-300 px-1.5 py-0.5 rounded font-bold leading-tight">
-                            {AUTO_TRIGGER_LABELS[macro.trigger]}
-                          </span>
-                        )}
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">#{i + 1}</span>
+                        <span className="text-[10px] bg-purple-600/30 text-purple-300 px-2 py-0.5 rounded font-bold">
+                          {AUTO_TRIGGER_LABELS[FIXED_AUTO_TRIGGERS[i]]}
+                        </span>
                       </div>
                       <p className={`text-xs leading-snug truncate ${macro.text ? 'text-slate-200' : 'text-slate-600 italic'}`}>
-                        {macro.text || '빈 슬롯'}
+                        {macro.text || '내용 없음 · 편집에서 입력'}
                       </p>
                     </button>
                   ))
@@ -728,20 +806,19 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                   rows={2}
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500 resize-none"
                 />
-                {macroTab === 'auto' && (
-                  <div>
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">자동 발동 조건</p>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {ALL_TRIGGERS.map(t => (
-                        <button
-                          key={t}
-                          onClick={() => setEditTrigger(t)}
-                          className={`py-2 px-3 rounded-lg text-[11px] font-bold transition-colors text-left ${editTrigger === t ? 'bg-purple-600 text-white' : 'bg-white/5 text-slate-400 hover:text-white'}`}
-                        >
-                          {AUTO_TRIGGER_LABELS[t]}
-                        </button>
-                      ))}
-                    </div>
+                {macroTab === 'auto' && editingSlot !== null && (
+                  <div className="px-3 py-2 bg-purple-600/10 border border-purple-500/20 rounded-xl space-y-2">
+                    <p className="text-[10px] font-black text-purple-300 uppercase tracking-widest">
+                      발동 조건 · {AUTO_TRIGGER_LABELS[FIXED_AUTO_TRIGGERS[editingSlot]]}
+                    </p>
+                    {(editingSlot === 1 || editingSlot === 3 || editingSlot === 4) && (
+                      <p className="text-[10px] text-slate-400 leading-relaxed">
+                        <span className="font-mono font-bold text-yellow-400">##</span> 입력 시 상대방 닉네임으로 자동 대체됩니다.
+                        <br/>
+                        <span className="text-slate-500">예: </span>
+                        <span className="font-mono text-slate-300">##님, 감사합니다!</span>
+                      </p>
+                    )}
                   </div>
                 )}
                 <div className="flex gap-2">
@@ -753,9 +830,18 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
             {/* 자동 매크로 안내 (편집 모드 아닐 때) */}
             {macroTab === 'auto' && !isMacroEditMode && editingSlot === null && (
-              <p className="px-6 pb-5 text-[11px] text-slate-500 font-medium text-center">
-                자동 매크로는 설정된 조건에서 자동으로 전송됩니다. 편집 버튼을 눌러 설정하세요.
-              </p>
+              <div className="px-6 pb-5 space-y-2">
+                <p className="text-xs text-slate-500 font-medium">
+                  ☞ 자동 매크로는 설정된 조건에서 자동으로 전송됩니다.
+                </p>
+                <p className="text-xs text-slate-500 font-medium">
+                  ☞ <span className="text-slate-400">2번, 4번, 5번</span> 슬롯에는 변수를 사용할 수 있습니다.{' '}
+                  (<span className="font-mono text-yellow-500/70">변수: ##</span>)
+                </p>
+                <p className="text-xs text-slate-600 font-mono pl-3">
+                  예) ##님, 환영합니다. → <span className="text-slate-500">(닉네임)님, 환영합니다.</span>
+                </p>
+              </div>
             )}
 
             <div className="h-5"></div>
@@ -768,17 +854,53 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         <div className="fixed inset-0 z-[6000] flex items-center justify-center px-6">
           <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowGiftModal(null)}></div>
           <div className="relative glass p-10 rounded-[3rem] border border-yellow-500/20 w-full text-center animate-in zoom-in-95 duration-300">
+            <button onClick={() => setShowGiftModal(null)} className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/15 text-slate-400 hover:text-white transition-all text-lg">✕</button>
             <div className="text-4xl mb-6">🎁</div>
-            <h3 className="text-2xl font-mystic font-black text-yellow-500 mb-2 uppercase tracking-widest">Transmit Essence</h3>
-            <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-8 italic">{showGiftModal.userName}님에게 기운을 전수합니다.</p>
+            <h3 className="text-[22px] sm:text-2xl font-mystic font-black text-yellow-500 mb-2 uppercase tracking-tight sm:tracking-widest whitespace-nowrap">Transmit Essence</h3>
+            <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-3 italic">{showGiftModal.userName}{(() => { const tag = showGiftModal.userUniqueTag || participants.find(p => p.uid === showGiftModal.userId)?.uniqueTag || ''; return tag ? `(${tag})` : ''; })()}님에게 루멘을 선물합니다.</p>
+            <p className="text-[11px] text-slate-400 font-bold mb-6">보유 루멘 <span className="text-yellow-400 font-black">{orb.points.toLocaleString()} L</span></p>
             <div className="space-y-6">
-              <div className="flex items-center bg-slate-950/50 border border-slate-800 rounded-2xl p-2">
-                <button onClick={() => setGiftAmount(Math.max(100, parseInt(giftAmount) - 100).toString())} className="w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center text-slate-400 hover:text-white">-</button>
-                <input type="number" value={giftAmount} onChange={e => setGiftAmount(e.target.value)} className="flex-1 bg-transparent text-center font-black text-2xl text-white outline-none tabular-nums"/>
-                <button onClick={() => setGiftAmount((parseInt(giftAmount) + 100).toString())} className="w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center text-slate-400 hover:text-white">+</button>
+              <div>
+                <div className="flex items-center bg-slate-950/50 border border-slate-800 rounded-2xl p-2">
+                  <button onClick={() => { const cur = parseInt(giftAmount); if (isNaN(cur)) return; setGiftAmount(String(Math.max(100, cur % 100 === 0 ? cur - 100 : Math.floor(cur / 100) * 100))); }} className="w-12 h-12 shrink-0 bg-white/5 rounded-xl flex items-center justify-center text-slate-400 hover:text-white text-xl font-black">−</button>
+                  <input type="number" value={giftAmount} onChange={e => setGiftAmount(e.target.value)} className="flex-1 min-w-0 bg-transparent text-center font-black text-2xl text-white outline-none tabular-nums"/>
+                  <button onClick={() => { const cur = parseInt(giftAmount); setGiftAmount(String(isNaN(cur) ? 100 : cur % 100 === 0 ? cur + 100 : Math.ceil(cur / 100) * 100)); }} className="w-12 h-12 shrink-0 bg-white/5 rounded-xl flex items-center justify-center text-slate-400 hover:text-white text-xl font-black">+</button>
+                </div>
+                <p className="text-right text-[10px] text-slate-600 font-bold mt-1.5">(최소단위: 100루멘)</p>
               </div>
-              <button onClick={handleGiftLumen} className="w-full py-5 bg-yellow-600 text-slate-950 font-black rounded-2xl shadow-xl uppercase tracking-widest text-sm">루멘 전수하기</button>
+              <button onClick={handleGiftPrecheck} className="w-full py-5 bg-yellow-600 text-slate-950 font-black rounded-2xl shadow-xl uppercase tracking-widest text-sm">루멘 선물하기</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 루멘 선물 확인 모달 ── */}
+      {showGiftConfirm && showGiftModal && (
+        <div className="fixed inset-0 z-[7000] flex items-center justify-center px-8">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowGiftConfirm(false)} />
+          <div className="relative glass p-8 rounded-[2.5rem] border border-yellow-500/20 w-full max-w-xs text-center animate-in zoom-in-95 duration-200">
+            <div className="text-3xl mb-4">🎁</div>
+            <p className="text-sm font-black text-white leading-relaxed mb-2">
+              {showGiftModal.userName}{(() => { const tag = showGiftModal.userUniqueTag || participants.find(p => p.uid === showGiftModal.userId)?.uniqueTag || ''; return tag ? `(${tag})` : ''; })()}님에게
+            </p>
+            <p className="text-xl font-black text-yellow-400 mb-6">{parseInt(giftAmount).toLocaleString()} 루멘</p>
+            <p className="text-xs text-slate-500 font-bold mb-8">을 선물하시겠습니까?</p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowGiftConfirm(false)} className="flex-1 py-3.5 bg-white/5 text-slate-400 font-black rounded-2xl text-sm hover:bg-white/10 transition-all">취소</button>
+              <button onClick={() => { setShowGiftConfirm(false); handleGiftLumen(); }} className="flex-1 py-3.5 bg-yellow-600 text-slate-950 font-black rounded-2xl text-sm hover:brightness-110 transition-all">선물하기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 루멘 입력 유효성 에러 모달 ── */}
+      {giftValidError && (
+        <div className="fixed inset-0 z-[7000] flex items-center justify-center px-8">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setGiftValidError(null)} />
+          <div className="relative glass p-8 rounded-[2.5rem] border border-rose-500/20 w-full max-w-xs text-center animate-in zoom-in-95 duration-200">
+            <div className="text-3xl mb-4">⚠️</div>
+            <p className="text-sm font-black text-white leading-relaxed whitespace-pre-line mb-6">{giftValidError}</p>
+            <button onClick={() => setGiftValidError(null)} className="w-full py-3.5 bg-rose-600/80 text-white font-black rounded-2xl text-sm uppercase tracking-widest hover:bg-rose-500 transition-all">확인</button>
           </div>
         </div>
       )}

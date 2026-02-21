@@ -389,7 +389,10 @@ const BoardPanel: React.FC<BoardPanelProps> = ({ profile, orb, currentView, onSe
       <div className="flex-1 overflow-y-auto p-6 md:p-10 custom-scroll">
         <div className="max-w-4xl mx-auto space-y-6">
           <div className="flex justify-between items-center">
-            <h3 className="text-xl font-mystic font-black text-white tracking-widest uppercase">천상의 회람판</h3>
+            <div className="space-y-0.5">
+              <h3 className="text-2xl font-mystic font-black text-transparent bg-clip-text bg-gradient-to-r from-emerald-300 via-teal-200 to-indigo-300 tracking-tight">천상의 회람판</h3>
+              <p className="text-[9px] font-black text-slate-600 uppercase tracking-[0.3em]">Celestial Bulletin</p>
+            </div>
             <button onClick={() => { resetForm(); onSetView('post-edit'); }} className="px-8 py-3 bg-emerald-600 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-xl shadow-emerald-600/20 hover:bg-emerald-500 transition-all">글쓰기</button>
           </div>
 
@@ -421,7 +424,7 @@ const BoardPanel: React.FC<BoardPanelProps> = ({ profile, orb, currentView, onSe
                 onClick={() => handlePostClick(post)}
                 className={`w-full glass p-5 rounded-2xl border text-left flex items-center gap-4 group transition-all ${post.isNotice ? 'border-amber-500/30 bg-amber-500/5' : 'border-white/5 hover:border-emerald-500/40'}`}
               >
-                <div className="w-10 shrink-0 text-center">
+                <div className="w-7 shrink-0 text-center">
                   {post.isNotice
                     ? <span className="bg-amber-500 text-slate-950 text-[8px] font-black px-1.5 py-0.5 rounded uppercase">공지</span>
                     : <span className="text-[11px] font-black text-slate-600">{post.postNumber || '-'}</span>
@@ -429,14 +432,14 @@ const BoardPanel: React.FC<BoardPanelProps> = ({ profile, orb, currentView, onSe
                 </div>
                 <div className="flex-1 min-w-0 space-y-1.5">
                   <div className="flex items-center gap-2">
-                    <h4 className={`text-sm font-black truncate group-hover:text-emerald-400 transition-colors ${post.isNotice ? 'text-amber-300' : 'text-slate-200'}`}>{post.title}</h4>
+                    <h4 className={`text-xs font-black truncate group-hover:text-emerald-400 transition-colors ${post.isNotice ? 'text-amber-300' : 'text-slate-200'}`}>{post.title}</h4>
                     {(post.comments?.length ?? 0) > 0 && <span className="text-indigo-400 text-[10px] font-black shrink-0">[{post.comments.length}]</span>}
                   </div>
                   <div className="flex items-center justify-between gap-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
                     <span className="flex items-center gap-1.5 min-w-0 overflow-hidden">
                       {!post.isNotice && (
                         post.authorLevel >= 300
-                          ? <span className="border border-amber-500 text-amber-500 text-[8px] font-black px-1.5 py-0.5 rounded shrink-0">M</span>
+                          ? <span className="border border-emerald-500 text-emerald-400 text-[8px] font-black px-1.5 py-0.5 rounded shrink-0">M</span>
                           : post.authorLevel >= 200
                           ? <span className="border border-indigo-400 text-indigo-400 text-[8px] font-black px-1.5 py-0.5 rounded shrink-0">C</span>
                           : <span className="text-slate-600 shrink-0">Lv.{post.authorLevel}</span>
