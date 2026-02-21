@@ -12,6 +12,46 @@ const MysticAnalysisLab: React.FC<MysticAnalysisLabProps> = ({ lottoHistory, onB
   const [sortBy, setSortBy] = useState<'number' | 'count'>('number');
   const [pageSize, setPageSize] = useState(10);
   const [searchQuery, setSearchQuery] = useState('');
+  const [infoModal, setInfoModal] = useState<string | null>(null);
+
+  const LAB_INFO: Record<string, { title: string; body: string }> = {
+    odd_even: {
+      title: '음양의 파동 (홀짝 분포)',
+      body: '6개 번호 중 홀수와 짝수의 비율을 분석합니다.\n\n역대 당첨 번호 기준으로 홀3:짝3 또는 홀4:짝2 비율이 가장 빈번하게 출현합니다. 6개 모두 홀수이거나 모두 짝수인 조합은 통계적으로 매우 드뭅니다.\n\n균형 잡힌 홀짝 비율(2:4 ~ 4:2)이 역사적으로 가장 자연스러운 패턴입니다.',
+    },
+    high_low: {
+      title: '높낮이 기류 (고저 분포)',
+      body: '1~22를 저(Low), 23~45를 고(High)로 분류해 비율을 분석합니다.\n\n역대 당첨 번호는 고(High) 쪽이 약간 우세하거나 균등한 경향이 있습니다. 저3:고3 또는 저2:고4 조합이 통계적으로 자주 출현합니다.\n\n한쪽으로 극단적으로 몰린 조합(저0:고6 등)은 출현 빈도가 낮습니다.',
+    },
+    ending_digits: {
+      title: '끝자리 조화 (일의 자리 분포)',
+      body: '6개 번호 각각의 일의 자리(0~9) 출현 횟수를 집계합니다.\n\n특정 끝자리에 번호가 집중되지 않고 고르게 분포된 조합이 통계적으로 더 자연스럽습니다.\n\n예를 들어 3, 13, 23, 33과 같이 끝자리가 모두 같은 조합은 당첨 확률이 낮다는 통계적 경향이 있습니다.',
+    },
+    ritual_marking: {
+      title: '운명 마킹 패턴 (실물 슬립 분포)',
+      body: '실제 로또 용지 규격(가로 7칸 × 세로 7행)에 맞춰 최근 회차별 당첨 번호의 위치 패턴을 시각화합니다.\n\n밝게 표시된 칸일수록 해당 번호가 지정 기간 내 자주 당첨된 번호입니다.\n\n특정 구역(상단·하단·중앙 등)에 편중되는 경향이 있는지 직관적으로 확인할 수 있습니다.',
+    },
+    ac_index: {
+      title: '구조 복잡성 지수 (AC Index)',
+      body: 'AC(Arithmetic Complexity)는 6개 번호 간 차이값의 종류 수를 측정합니다.\n\n• AC 0~6 — 번호들이 규칙적으로 배열된 단순한 조합 (연속 번호, 등차수열 등)\n• AC 7~10 — 불규칙하고 복잡한 조합\n\n역대 당첨 번호의 95% 이상이 AC 7~10 구간에 집중되어 있습니다. 따라서 AC 7 이상을 설정하는 것이 통계적으로 유리합니다.',
+    },
+    sum_orbit: {
+      title: '총합 에너지 궤적 (Sum Orbit)',
+      body: '6개 번호의 합계가 어느 구간에 얼마나 몰려 있는지 보여줍니다.\n\n1~45에서 6개를 뽑을 때 이론적 평균 합계는 138입니다. 역대 당첨 번호의 약 70% 이상이 101~180 구간에 분포하며, 141~180 구간이 역사적으로 가장 빈도가 높습니다.\n\n합계가 21~100 또는 181~255처럼 극단적인 조합은 당첨 확률이 통계적으로 낮습니다.',
+    },
+    prime_resonance: {
+      title: '소수 공명 분석 (Prime Resonance)',
+      body: '당첨 번호 중 소수(2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43)의 출현 빈도를 집계합니다.\n\n1~45 중 소수는 14개(약 31%)이므로, 6개 번호 중 평균 약 2개의 소수가 포함되는 것이 통계적으로 자연스럽습니다.\n\n소수가 0개이거나 5개 이상인 조합은 출현 빈도가 낮은 편입니다.',
+    },
+    color_resonance: {
+      title: '색채 에너지 분포 (Color Resonance)',
+      body: '한국 로또는 번호대별로 볼 색깔이 다릅니다.\n\n• 1~10  — 노란 볼 🟡\n• 11~20 — 파란 볼 🔵\n• 21~30 — 빨간 볼 🔴\n• 31~40 — 회색 볼 ⚫\n• 41~45 — 초록 볼 🟢\n\n각 구간에서 당첨 번호가 출현한 총 횟수 비율을 보여줍니다. 지정 기간 동안 특정 색(번호대)이 얼마나 자주 뽑혔는지 파악하는 데 활용할 수 있습니다.\n\n이론적으로는 구간별 번호 수(10·10·10·10·5개)에 비례한 출현이 자연스럽습니다.',
+    },
+    silent_numbers: {
+      title: '침묵의 수 (Silent Cold Numbers)',
+      body: '지정된 분석 기간 동안 단 한 번도 당첨 번호에 포함되지 않은 숫자들입니다.\n\n기간을 짧게 설정할수록(최근 5회차 등) 침묵의 수가 많이 나타나고, 전체 회차로 넓히면 대부분 사라집니다.\n\n침묵의 수가 반드시 다음에 나올 가능성이 높다는 의미는 아닙니다. 로또는 매 회차 독립 시행이므로 이전 출현 여부가 다음 결과에 영향을 주지 않습니다. 참고 지표로만 활용하세요.',
+    },
+  };
 
   const statsData = useMemo(() => {
     if (timeFilter === 'all') return lottoHistory;
@@ -187,25 +227,25 @@ const MysticAnalysisLab: React.FC<MysticAnalysisLabProps> = ({ lottoHistory, onB
                           const odds = round.numbers.filter(n => n % 2 !== 0).length;
                           const highs = round.numbers.filter(n => n >= 23).length;
                           return (
-                            <div key={round.round} className="glass p-6 rounded-[2rem] border border-white/5 flex flex-col md:flex-row items-center justify-between group hover:border-cyan-500/30 transition-all">
-                               <div className="flex items-center space-x-8 mb-4 md:mb-0">
-                                  <div className="text-center w-16">
+                            <div key={round.round} className="glass p-6 rounded-[2rem] border border-white/5 space-y-4 group hover:border-cyan-500/30 transition-all">
+                               <div className="flex items-center gap-4">
+                                  <div className="text-center w-14 shrink-0">
                                      <p className="text-[10px] font-black text-slate-500 uppercase">Round</p>
                                      <p className="text-lg font-mystic font-black text-white">{round.round}</p>
                                   </div>
-                                  <div className="flex gap-2">
+                                  <div className="flex flex-wrap gap-2">
                                      {round.numbers.map(n => (
                                        <div key={n} className={`w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-black text-white shadow-lg border-t border-white/20 ${getBallColor(n)}`}>
                                          {n}
                                        </div>
                                      ))}
-                                     <div className="w-[1px] h-9 bg-white/5 mx-1"></div>
+                                     <div className="w-[1px] h-9 bg-white/5 mx-1 shrink-0"></div>
                                      <div className={`w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-black text-white shadow-lg border-t border-white/20 ${getBallColor(round.bonus)} ring-2 ring-white/10 ring-offset-2 ring-offset-slate-950`}>
                                         {round.bonus}
                                      </div>
                                   </div>
                                </div>
-                               <div className="flex items-center space-x-6 text-[10px] font-black uppercase tracking-widest">
+                               <div className="flex items-center gap-3 flex-wrap text-[10px] font-black uppercase tracking-widest pl-[4.5rem]">
                                   <div className="text-center px-4 py-2 bg-white/5 rounded-xl border border-white/5">
                                      <p className="text-slate-500 mb-1">홀 : 짝</p>
                                      <p className="text-cyan-400">{odds} : {6 - odds}</p>
@@ -255,7 +295,7 @@ const MysticAnalysisLab: React.FC<MysticAnalysisLabProps> = ({ lottoHistory, onB
                           <button onClick={() => setSortBy('count')} className={`px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${sortBy === 'count' ? 'bg-cyan-600 text-slate-950' : 'text-slate-500'}`}>출현순</button>
                         </div>
                       </div>
-                      <div className="grid grid-cols-5 md:grid-cols-9 gap-3">
+                      <div className="grid grid-cols-7 gap-3">
                          {sortedNumbers.map(({ num, count }) => {
                            const max = Math.max(...stats.counts);
                            const intensity = max === 0 ? 0 : count / max;
@@ -270,19 +310,20 @@ const MysticAnalysisLab: React.FC<MysticAnalysisLabProps> = ({ lottoHistory, onB
                       </div>
                    </section>
 
-                   <section className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                      <div className="glass p-8 rounded-[3rem] border border-white/5 space-y-6">
+                   <section className="space-y-8">
+                      <div className="glass p-8 rounded-[3rem] border border-white/5 space-y-6 relative">
+                         <button onClick={() => setInfoModal('color_resonance')} className="absolute top-4 right-4 w-5 h-5 rounded-full border border-cyan-400/30 text-[9px] font-black text-cyan-400/60 hover:text-cyan-300 hover:border-cyan-300 flex items-center justify-center transition-all z-10">?</button>
                          <h4 className="text-xs font-black text-cyan-400 uppercase tracking-widest">색채 에너지 분포 (Color Resonance)</h4>
                          <div className="space-y-4">
                             {[
-                              { label: '단번대 (1-10)', count: stats.colorCounts.yellow, color: 'bg-[#facc15]' },
-                              { label: '십번대 (11-20)', count: stats.colorCounts.blue, color: 'bg-[#3b82f6]' },
-                              { label: '이십번대 (21-30)', count: stats.colorCounts.red, color: 'bg-[#ef4444]' },
-                              { label: '삼십번대 (31-40)', count: stats.colorCounts.gray, color: 'bg-[#94a3b8]' },
-                              { label: '사십번대 (41-45)', count: stats.colorCounts.green, color: 'bg-[#10b981]' },
+                              { label: '노랑 (1-10)', count: stats.colorCounts.yellow, color: 'bg-[#facc15]' },
+                              { label: '파랑 (11-20)', count: stats.colorCounts.blue, color: 'bg-[#3b82f6]' },
+                              { label: '빨강 (21-30)', count: stats.colorCounts.red, color: 'bg-[#ef4444]' },
+                              { label: '회색 (31-40)', count: stats.colorCounts.gray, color: 'bg-[#94a3b8]' },
+                              { label: '초록 (41-45)', count: stats.colorCounts.green, color: 'bg-[#10b981]' },
                             ].map(band => {
-                              const total = Object.values(stats.colorCounts).reduce((a, b) => a + b, 0);
-                              const percent = total === 0 ? 0 : (band.count / total) * 100;
+                              const total = (Object.values(stats.colorCounts) as number[]).reduce((a, b) => a + b, 0);
+                              const percent = total === 0 ? 0 : ((band.count as number) / total) * 100;
                               return (
                                 <div key={band.label} className="space-y-1.5">
                                    <div className="flex justify-between text-[9px] font-black uppercase tracking-widest">
@@ -297,7 +338,8 @@ const MysticAnalysisLab: React.FC<MysticAnalysisLabProps> = ({ lottoHistory, onB
                             })}
                          </div>
                       </div>
-                      <div className="glass p-8 rounded-[3rem] border border-white/5 space-y-6">
+                      <div className="glass p-8 rounded-[3rem] border border-white/5 space-y-6 relative">
+                         <button onClick={() => setInfoModal('silent_numbers')} className="absolute top-4 right-4 w-5 h-5 rounded-full border border-pink-400/30 text-[9px] font-black text-pink-400/60 hover:text-pink-300 hover:border-pink-300 flex items-center justify-center transition-all z-10">?</button>
                          <h4 className="text-xs font-black text-pink-400 uppercase tracking-widest">침묵의 수 (Silent Cold Numbers)</h4>
                          <div className="flex flex-wrap gap-3">
                             {stats.silentNumbers.length === 0 ? (
@@ -318,70 +360,77 @@ const MysticAnalysisLab: React.FC<MysticAnalysisLabProps> = ({ lottoHistory, onB
 
               {activeTab === 'patterns' && (
                 <div className="space-y-12 animate-in slide-in-from-bottom-4 duration-500">
-                   <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                   <div className="space-y-8">
                       {/* 홀짝 통계 */}
-                      <div className="glass p-8 rounded-[3rem] border border-white/5 space-y-6 flex flex-col items-center">
-                         <div className="text-center space-y-1">
-                            <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest">음양의 파동 (Odd vs Even)</h4>
-                            <p className="text-[8px] text-slate-500 font-bold uppercase">홀수와 짝수의 균형적 분포 분석</p>
-                         </div>
-                         <div className="relative w-40 h-40">
+                      <div className="glass p-8 rounded-[3rem] border border-white/5 relative flex items-center gap-12">
+                         <button onClick={() => setInfoModal('odd_even')} className="absolute top-4 right-4 w-5 h-5 rounded-full border border-indigo-400/30 text-[9px] font-black text-indigo-400/60 hover:text-indigo-300 hover:border-indigo-300 flex items-center justify-center transition-all z-10">?</button>
+                         <div className="relative w-52 h-52 flex-shrink-0">
                             <svg viewBox="0 0 36 36" className="w-full h-full transform -rotate-90">
                                <circle cx="18" cy="18" r="15.9" fill="transparent" stroke="#1e293b" strokeWidth="3.5" />
-                               <circle 
-                                cx="18" cy="18" r="15.9" fill="transparent" stroke="#6366f1" strokeWidth="3.5" 
+                               <circle
+                                cx="18" cy="18" r="15.9" fill="transparent" stroke="#6366f1" strokeWidth="3.5"
                                 strokeDasharray={`${(stats.oddCounts[0] / (stats.oddCounts[0] + stats.oddCounts[1])) * 100} 100`}
                                />
                             </svg>
                             <div className="absolute inset-0 flex flex-col items-center justify-center">
-                               <span className="text-xl font-black text-white">{stats.oddCounts[0]} : {stats.oddCounts[1]}</span>
+                               <span className="text-2xl font-black text-white">{stats.oddCounts[0]} : {stats.oddCounts[1]}</span>
                                <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Odd : Even</span>
                             </div>
                          </div>
-                         <div className="w-full flex justify-around text-[10px] font-black uppercase tracking-widest">
-                            <div className="flex items-center space-x-2"><div className="w-2 h-2 bg-indigo-500 rounded-full"></div><span className="text-slate-400">Odd</span></div>
-                            <div className="flex items-center space-x-2"><div className="w-2 h-2 bg-slate-800 rounded-full"></div><span className="text-slate-400">Even</span></div>
+                         <div className="flex-1 space-y-4">
+                            <div className="space-y-1">
+                               <h4 className="text-sm font-black text-indigo-400 uppercase tracking-widest">음양의 파동 (Odd vs Even)</h4>
+                               <p className="text-[9px] text-slate-500 font-bold uppercase">홀수와 짝수의 균형적 분포 분석</p>
+                            </div>
+                            <div className="flex space-x-6 text-[10px] font-black uppercase tracking-widest">
+                               <div className="flex items-center space-x-2"><div className="w-2 h-2 bg-indigo-500 rounded-full"></div><span className="text-slate-400">Odd — {stats.oddCounts[0]}회</span></div>
+                               <div className="flex items-center space-x-2"><div className="w-2 h-2 bg-slate-700 rounded-full"></div><span className="text-slate-400">Even — {stats.oddCounts[1]}회</span></div>
+                            </div>
                          </div>
                       </div>
 
                       {/* 고저 통계 */}
-                      <div className="glass p-8 rounded-[3rem] border border-white/5 space-y-6 flex flex-col items-center">
-                         <div className="text-center space-y-1">
-                            <h4 className="text-xs font-black text-pink-400 uppercase tracking-widest">높낮이 기류 (Low vs High)</h4>
-                            <p className="text-[8px] text-slate-500 font-bold uppercase">23 미만(저)과 23 이상(고)의 비율 분석</p>
-                         </div>
-                         <div className="relative w-40 h-40">
+                      <div className="glass p-8 rounded-[3rem] border border-white/5 relative flex items-center gap-12">
+                         <button onClick={() => setInfoModal('high_low')} className="absolute top-4 right-4 w-5 h-5 rounded-full border border-pink-400/30 text-[9px] font-black text-pink-400/60 hover:text-pink-300 hover:border-pink-300 flex items-center justify-center transition-all z-10">?</button>
+                         <div className="relative w-52 h-52 flex-shrink-0">
                             <svg viewBox="0 0 36 36" className="w-full h-full transform -rotate-90">
                                <circle cx="18" cy="18" r="15.9" fill="transparent" stroke="#1e293b" strokeWidth="3.5" />
-                               <circle 
-                                cx="18" cy="18" r="15.9" fill="transparent" stroke="#f43f5e" strokeWidth="3.5" 
+                               <circle
+                                cx="18" cy="18" r="15.9" fill="transparent" stroke="#f43f5e" strokeWidth="3.5"
                                 strokeDasharray={`${(stats.highLowCounts[1] / (stats.highLowCounts[0] + stats.highLowCounts[1])) * 100} 100`}
                                />
                             </svg>
                             <div className="absolute inset-0 flex flex-col items-center justify-center">
-                               <span className="text-xl font-black text-white">{stats.highLowCounts[0]} : {stats.highLowCounts[1]}</span>
+                               <span className="text-2xl font-black text-white">{stats.highLowCounts[0]} : {stats.highLowCounts[1]}</span>
                                <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Low : High</span>
                             </div>
                          </div>
-                         <div className="w-full flex justify-around text-[10px] font-black uppercase tracking-widest">
-                            <div className="flex items-center space-x-2"><div className="w-2 h-2 bg-slate-800 rounded-full"></div><span className="text-slate-400">Low (&lt;23)</span></div>
-                            <div className="flex items-center space-x-2"><div className="w-2 h-2 bg-rose-500 rounded-full"></div><span className="text-slate-400">High (&ge;23)</span></div>
+                         <div className="flex-1 space-y-4">
+                            <div className="space-y-1">
+                               <h4 className="text-sm font-black text-pink-400 uppercase tracking-widest">높낮이 기류 (Low vs High)</h4>
+                               <p className="text-[9px] text-slate-500 font-bold uppercase">23 미만(저)과 23 이상(고)의 비율 분석</p>
+                            </div>
+                            <div className="flex space-x-6 text-[10px] font-black uppercase tracking-widest">
+                               <div className="flex items-center space-x-2"><div className="w-2 h-2 bg-slate-700 rounded-full"></div><span className="text-slate-400">Low (&lt;23) — {stats.highLowCounts[0]}회</span></div>
+                               <div className="flex items-center space-x-2"><div className="w-2 h-2 bg-rose-500 rounded-full"></div><span className="text-slate-400">High (&ge;23) — {stats.highLowCounts[1]}회</span></div>
+                            </div>
                          </div>
                       </div>
 
-                      {/* 끝수 통계 - 높이 균형 조정 */}
-                      <div className="glass p-8 rounded-[3rem] border border-white/5 space-y-6 flex flex-col justify-between">
-                         <div className="text-center space-y-1">
-                            <h4 className="text-xs font-black text-cyan-400 uppercase tracking-widest">끝자리 조화 (Ending Digits)</h4>
-                            <p className="text-[8px] text-slate-500 font-bold uppercase">번호의 일의 자리가 출현한 총 횟수</p>
+                      {/* 끝수 통계 */}
+                      <div className="glass p-8 rounded-[3rem] border border-white/5 space-y-6 relative">
+                         <button onClick={() => setInfoModal('ending_digits')} className="absolute top-4 right-4 w-5 h-5 rounded-full border border-cyan-400/30 text-[9px] font-black text-cyan-400/60 hover:text-cyan-300 hover:border-cyan-300 flex items-center justify-center transition-all z-10">?</button>
+                         <div className="space-y-1">
+                            <h4 className="text-sm font-black text-cyan-400 uppercase tracking-widest">끝자리 조화 (Ending Digits)</h4>
+                            <p className="text-[9px] text-slate-500 font-bold uppercase">번호의 일의 자리가 출현한 총 횟수</p>
                          </div>
-                         <div className="grid grid-cols-5 gap-x-2 gap-y-8 pt-6 pb-2">
+                         <div className="flex items-end justify-around h-52 gap-2 px-4">
                             {stats.endDigitCounts.map((count, i) => {
                               const max = Math.max(...stats.endDigitCounts);
-                              const height = max === 0 ? 0 : (count / max) * 100;
+                              const barH = max === 0 ? 0 : Math.round((count / max) * 168);
                               return (
-                                <div key={i} className="h-24 flex flex-col items-center justify-end">
-                                   <div className="w-full bg-cyan-600/30 border-t border-cyan-400 rounded-t-lg transition-all relative" style={{ height: `${height}%` }}>
+                                <div key={i} className="flex-1 flex flex-col items-center justify-end group">
+                                   <div className="w-full bg-cyan-600/30 border-t border-cyan-400 rounded-t-lg transition-all relative" style={{ height: `${barH}px` }}>
                                       <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] font-black text-white whitespace-nowrap">{count}</span>
                                    </div>
                                    <span className="mt-2 text-[10px] font-black text-slate-500">{i}</span>
@@ -394,7 +443,8 @@ const MysticAnalysisLab: React.FC<MysticAnalysisLabProps> = ({ lottoHistory, onB
 
                    {/* 마킹 패턴 시각화 (세로형 로또 슬립 디자인) */}
                    <section className="space-y-12">
-                      <div className="text-center">
+                      <div className="text-center relative">
+                         <button onClick={() => setInfoModal('ritual_marking')} className="absolute top-0 right-0 w-5 h-5 rounded-full border border-white/20 text-[9px] font-black text-slate-400 hover:text-white hover:border-white/50 flex items-center justify-center transition-all z-10">?</button>
                          <h4 className="text-3xl font-mystic font-black text-white uppercase tracking-widest">운명 마킹 패턴 (Ritual Marking)</h4>
                          <p className="text-[10px] text-slate-500 font-bold uppercase mt-2 italic">실제 복권 규격에 맞춘 회차별 번호 분포 (최근 10회차 단위)</p>
                       </div>
@@ -459,8 +509,9 @@ const MysticAnalysisLab: React.FC<MysticAnalysisLabProps> = ({ lottoHistory, onB
 
               {activeTab === 'advanced' && (
                 <div className="space-y-12 animate-in slide-in-from-bottom-4 duration-500">
-                   <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                      <div className="glass p-10 rounded-[4rem] border border-white/5 space-y-8">
+                   <div className="space-y-10">
+                      <div className="glass p-10 rounded-[4rem] border border-white/5 space-y-8 relative">
+                         <button onClick={() => setInfoModal('ac_index')} className="absolute top-5 right-5 w-5 h-5 rounded-full border border-amber-500/30 text-[9px] font-black text-amber-500/60 hover:text-amber-400 hover:border-amber-400 flex items-center justify-center transition-all z-10">?</button>
                          <div className="space-y-1 text-center">
                             <h4 className="text-xs font-black text-amber-500 uppercase tracking-widest">구조 복잡성 지수 (AC Index)</h4>
                             <p className="text-[9px] text-slate-500 font-bold uppercase tracking-tight italic">수치가 높을수록 당첨 빈도가 통계적으로 높습니다.</p>
@@ -468,12 +519,12 @@ const MysticAnalysisLab: React.FC<MysticAnalysisLabProps> = ({ lottoHistory, onB
                          <div className="flex items-end justify-between h-48 gap-1 px-4">
                             {stats.acCounts.map((count, i) => {
                               const max = Math.max(...stats.acCounts);
-                              const height = max === 0 ? 0 : (count / max) * 100;
+                              const barH = max === 0 ? 0 : Math.round((count / max) * 160);
                               const isRare = i < 7;
                               return (
                                 <div key={i} className="flex-1 flex flex-col items-center justify-end group">
-                                   <div className={`w-full rounded-t-lg transition-all duration-700 ${isRare ? 'bg-slate-800' : 'bg-amber-600/60 border-t border-amber-400 group-hover:bg-amber-50'}`} style={{ height: `${height}%` }}></div>
-                                   <span className="mt-3 text-[9px] font-black text-slate-500">{i}</span>
+                                   <div className={`w-full rounded-t-lg transition-all duration-700 ${isRare ? 'bg-slate-800' : 'bg-amber-600/60 border-t border-amber-400 group-hover:bg-amber-500'}`} style={{ height: `${barH}px` }}></div>
+                                   <span className="mt-2 text-[9px] font-black text-slate-500">{i}</span>
                                 </div>
                               );
                             })}
@@ -483,7 +534,8 @@ const MysticAnalysisLab: React.FC<MysticAnalysisLabProps> = ({ lottoHistory, onB
                          </div>
                       </div>
 
-                      <div className="glass p-10 rounded-[4rem] border border-white/5 space-y-8">
+                      <div className="glass p-10 rounded-[4rem] border border-white/5 space-y-8 relative">
+                         <button onClick={() => setInfoModal('sum_orbit')} className="absolute top-5 right-5 w-5 h-5 rounded-full border border-emerald-400/30 text-[9px] font-black text-emerald-400/60 hover:text-emerald-300 hover:border-emerald-300 flex items-center justify-center transition-all z-10">?</button>
                          <div className="space-y-1 text-center">
                             <h4 className="text-xs font-black text-emerald-400 uppercase tracking-widest">총합 에너지 궤적 (Sum Orbit)</h4>
                             <p className="text-[9px] text-slate-500 font-bold uppercase tracking-tight italic">기운이 가장 많이 뭉쳐있는 합계 구간을 확인하십시오.</p>
@@ -491,7 +543,7 @@ const MysticAnalysisLab: React.FC<MysticAnalysisLabProps> = ({ lottoHistory, onB
                          <div className="space-y-5 pt-4">
                             {Object.entries(stats.sumRanges).map(([range, count]) => {
                               const total = statsData.length;
-                              const percent = total === 0 ? 0 : (count / total) * 100;
+                              const percent = total === 0 ? 0 : ((count as number) / total) * 100;
                               const isCommon = range === '141-180' || range === '101-140';
                               return (
                                 <div key={range} className="space-y-1.5">
@@ -509,7 +561,8 @@ const MysticAnalysisLab: React.FC<MysticAnalysisLabProps> = ({ lottoHistory, onB
                       </div>
                    </div>
 
-                   <section className="glass p-10 rounded-[4rem] border border-white/5 text-center space-y-8">
+                   <section className="glass p-10 rounded-[4rem] border border-white/5 text-center space-y-8 relative">
+                      <button onClick={() => setInfoModal('prime_resonance')} className="absolute top-5 right-5 w-5 h-5 rounded-full border border-cyan-400/30 text-[9px] font-black text-cyan-400/60 hover:text-cyan-300 hover:border-cyan-300 flex items-center justify-center transition-all z-10">?</button>
                       <div className="space-y-2">
                          <h4 className="text-xl font-mystic font-black text-cyan-400 uppercase tracking-widest">소수 공명 분석 (Prime Resonance)</h4>
                          <p className="text-[10px] text-slate-500 font-bold uppercase italic">수학적 근본을 지닌 소수(2, 3, 5, 7, 11...)의 출현 빈도입니다.</p>
@@ -535,6 +588,32 @@ const MysticAnalysisLab: React.FC<MysticAnalysisLabProps> = ({ lottoHistory, onB
            </div>
         </main>
       </div>
+
+      {infoModal && (
+        <div className="fixed inset-0 z-[5000] flex items-center justify-center p-6" onClick={() => setInfoModal(null)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+          <div className="relative glass rounded-[3rem] border border-white/10 p-10 max-w-sm w-full space-y-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-black text-cyan-400 uppercase tracking-widest leading-relaxed">
+              {LAB_INFO[infoModal]?.title}
+            </h3>
+            <div className="space-y-3">
+              {LAB_INFO[infoModal]?.body.split('\n\n').map((para, i) => (
+                <p key={i} className="text-[11px] text-slate-300 leading-relaxed">
+                  {para.split('\n').map((line, j, arr) => (
+                    <React.Fragment key={j}>{line}{j < arr.length - 1 && <br />}</React.Fragment>
+                  ))}
+                </p>
+              ))}
+            </div>
+            <button
+              onClick={() => setInfoModal(null)}
+              className="w-full py-3 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white hover:bg-white/10 transition-all"
+            >
+              닫기
+            </button>
+          </div>
+        </div>
+      )}
 
       <style>{`
         .custom-scroll::-webkit-scrollbar { width: 4px; }

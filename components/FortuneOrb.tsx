@@ -8,7 +8,7 @@ interface FortuneOrbProps {
 }
 
 // 구슬의 순수 시각적 표현을 담당하는 컴포넌트 (중앙 및 푸터 공용)
-export const OrbVisual: React.FC<{ level: number; isLarge?: boolean; className?: string }> = ({ level, isLarge = false, className = "" }) => {
+export const OrbVisual: React.FC<{ level: number; isLarge?: boolean; className?: string; overlayAnimation?: string }> = ({ level, isLarge = false, className = "", overlayAnimation }) => {
   const scale = isLarge ? 1.8 : 1;
   let opacity = 1;
 
@@ -120,6 +120,10 @@ export const OrbVisual: React.FC<{ level: number; isLarge?: boolean; className?:
           </>
         )}
       </div>
+      {overlayAnimation && (
+        <div className="absolute rounded-full blur-xl pointer-events-none"
+          style={{ width: '75%', height: '75%', top: '12.5%', left: '12.5%', animation: overlayAnimation }} />
+      )}
     </div>
   );
 };
@@ -236,9 +240,14 @@ const FortuneOrb: React.FC<FortuneOrbProps> = ({ orb, onGrow }) => {
       )}
 
       <div className="relative group cursor-pointer mb-[15px]" onClick={onGrow}>
-        <div className={`absolute inset-0 rounded-full scale-125 opacity-30 ${activeDecoration.effectClass}`} style={{ backgroundColor: orb.color }}></div>
+        {/* 외부 오라 링 */}
+        {activeDecoration.outerAnimation ? (
+          <div className="absolute inset-0 rounded-full scale-125" style={{ animation: activeDecoration.outerAnimation }}></div>
+        ) : (
+          <div className={`absolute inset-0 rounded-full scale-125 opacity-30 ${activeDecoration.effectClass}`} style={{ backgroundColor: orb.color }}></div>
+        )}
         <div className="relative transform group-hover:scale-105 transition-transform duration-1000 animate-pulse-gold">
-          <OrbVisual level={orb.level} className="w-56 h-56" />
+          <OrbVisual level={orb.level} className="w-56 h-56" overlayAnimation={activeDecoration.overlayAnimation} />
           <div className="absolute inset-0 bg-white/5 mix-blend-overlay animate-pulse rounded-full"></div>
           {!isUniversalCrystal && (
             <div className="absolute inset-0 z-20 flex flex-col items-center justify-center px-4 select-none">
@@ -281,7 +290,7 @@ const FortuneOrb: React.FC<FortuneOrbProps> = ({ orb, onGrow }) => {
         >
           기운 정화하기 (+5 EXP)
         </button>
-        <p className="text-xs text-slate-600 italic font-medium">화면을 탭하여 구슬을 정화하십시오</p>
+        <p className="text-xs text-slate-600 italic font-medium">구슬을 탭하여 정화의 기운을 얻으십시오</p>
 
       </div>
 

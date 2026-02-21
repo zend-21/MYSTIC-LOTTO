@@ -8,9 +8,18 @@ const ADMIN_INFINITE_POINTS = 999999999; // ∞ 표시 기준값
 // 포인트 표시 헬퍼
 const displayPoints = (pts: number) => pts >= ADMIN_INFINITE_POINTS ? '∞' : pts.toLocaleString();
 
+// KST(UTC+9) 기준 날짜 문자열 반환 (YYYY-MM-DD)
+// new Date().toISOString()은 UTC 기준이라 자정~오전9시 사이에 날짜가 안 바뀌는 버그 방지
+const getKSTDateString = () =>
+  new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+// 활성 데코레이션 계산 헬퍼
+const getActiveDecoration = (orb: { activeDecorationId?: string }) =>
+  ORB_DECORATIONS.find(d => d.id === orb.activeDecorationId) || ORB_DECORATIONS[0];
+
 import React, { useState, useEffect, useRef } from 'react';
-import { UserProfile, FortuneResult, SavedFortune, OrbState, LottoRound, ORB_DECORATIONS, GOLDEN_CARD_PRICE, OFFERING_CONVERSION_RATE, AnnualDestiny, ScientificAnalysisResult, ScientificFilterConfig, DAILY_LIMIT, COST_ANNUAL, INITIAL_POINTS } from './types';
-import { getFortuneAndNumbers, getFixedDestinyNumbers, spendPoints } from './services/geminiService';
+import { UserProfile, FortuneResult, SavedFortune, OrbState, LottoRound, ORB_DECORATIONS, GOLDEN_CARD_PRICE, AnnualDestiny, ScientificAnalysisResult, ScientificFilterConfig, DAILY_LIMIT, COST_ANNUAL, INITIAL_POINTS } from './types';
+import { getFortuneAndNumbers, getFixedDestinyNumbers, spendPoints, performOffering } from './services/geminiService';
 import { getScientificRecommendation } from './services/scientificService';
 import FortuneOrb, { OrbVisual } from './components/FortuneOrb';
 import LottoGenerator from './components/LottoGenerator';
@@ -25,6 +34,7 @@ import MysticAnalysisLab from './components/MysticAnalysisLab';
 import ProfileSetupForm from './components/ProfileSetupForm';
 import AdminModal from './components/AdminModal';
 import AnnualReportModal from './components/AnnualReportModal';
+import { LegalModal, TermsContent, PrivacyContent } from './components/LegalDocs';
 
 // Firebase imports
 import { auth, db, loginWithGoogle, logout } from './services/firebase';
@@ -41,9 +51,22 @@ const App: React.FC = () => {
   const [scienceLoading, setScienceLoading] = useState(false);
   const [fixedRitualLoading, setFixedRitualLoading] = useState(false);
   const [result, setResult] = useState<FortuneResult | null>(null);
+  const [divineSavedAt, setDivineSavedAt] = useState<number | null>(null);
   const [scienceResult, setScientificResult] = useState<ScientificAnalysisResult | null>(null);
   const [showShop, setShowShop] = useState(false);
-  const [activeTab, setActiveTab] = useState<'orb' | 'treasury' | 'offering' | 'science'>('orb');
+  const [activeTab, setActiveTab] = useState<'orb' | 'treasury' | 'offering' | 'science' | 'shop'>('orb');
+  const [showWelcomeModal, setShowWelcomeModal] = useState(false);
+  // 약관 모달
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+  // 로그인 화면 동의 체크박스
+  const [loginAgreedTerms, setLoginAgreedTerms] = useState(false);
+  const [loginAgreedPrivacy, setLoginAgreedPrivacy] = useState(false);
+  // 기존 유저 약관 동의 오버레이 체크박스
+  const [overlayAgreedTerms, setOverlayAgreedTerms] = useState(false);
+  const [overlayAgreedPrivacy, setOverlayAgreedPrivacy] = useState(false);
+  // 기존 유저 약관 동의 여부 (Firestore 기준)
+  const [termsAccepted, setTermsAccepted] = useState<boolean | null>(null);
   const [view, setView] = useState<'main' | 'square' | 'profile' | 'analysis'>('main');
   const [showMenu, setShowMenu] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -66,9 +89,11 @@ const App: React.FC = () => {
 
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [showMiningModal, setShowMiningModal] = useState(false);
+  const [hasNewReports, setHasNewReports] = useState(false);
 
   const [archives, setArchives] = useState<SavedFortune[]>([]);
   const [offeringData, setOfferingData] = useState<{amount: number, multiplier: number} | null>(null);
+  const [isOfferingLoading, setIsOfferingLoading] = useState(false);
   const [lumenReceivedAt, setLumenReceivedAt] = useState(0);
 
   const [orb, setOrb] = useState<OrbState>({
@@ -85,7 +110,7 @@ const App: React.FC = () => {
     purchaseHistory: [],
     annualDestinies: {},
     dailyExtractCount: 0,
-    lastExtractDate: new Date().toISOString().split('T')[0],
+    lastExtractDate: getKSTDateString(),
     favoriteRoomIds: [],
     lastVisitDate: '',
     dailyOrbTapExp: 0,
@@ -119,6 +144,13 @@ const App: React.FC = () => {
       }
     }
   };
+
+  // 웰컴 모달: 최초 1회 (localStorage 기준)
+  useEffect(() => {
+    if (!localStorage.getItem('mlotto_welcome_v1')) {
+      setShowWelcomeModal(true);
+    }
+  }, []);
 
   // 1. Auth & Data Stream
   useEffect(() => {
@@ -159,7 +191,7 @@ const App: React.FC = () => {
               // 매일 첫 방문 보너스 (100 루멘) — 세션당 1회만 처리
               if (!hasGrantedVisitBonusRef.current) {
                 hasGrantedVisitBonusRef.current = true;
-                const today = new Date().toISOString().split('T')[0];
+                const today = getKSTDateString();
                 if ((orbData.lastVisitDate || '') !== today) {
                   updateDoc(userDocRef, {
                     'orb.points': increment(100),
@@ -171,6 +203,13 @@ const App: React.FC = () => {
           } else {
             // New user initialization
             setDoc(userDocRef, { orb: { ...orb, points: INITIAL_POINTS } }, { merge: true });
+          }
+          // 약관 동의 여부 — 스냅샷 데이터에서 직접 확인
+          if (snap.exists()) {
+            setTermsAccepted(!!(snap.data().termsAcceptedAt));
+          } else {
+            // 신규 유저: 로그인 화면에서 동의 완료
+            setTermsAccepted(true);
           }
         });
         const archivesQuery = query(collection(db, "users", user.uid, "archives"), orderBy("timestamp", "desc"));
@@ -236,8 +275,14 @@ const App: React.FC = () => {
 
           if (session.divine && !session.divine.viewed && (now - session.divine.savedAt) < RECOVERY_WINDOW) {
             setResult(session.divine.data as FortuneResult);
+            setDivineSavedAt(session.divine.savedAt as number);
             setToast("이전에 발행된 천기를 복구했습니다. ✨");
             updates['divine.viewed'] = true;
+          }
+
+          if (session.science_full && !session.science_full.viewed && (now - session.science_full.savedAt) < RECOVERY_WINDOW) {
+            setScientificResult(session.science_full.data as ScientificAnalysisResult);
+            updates['science_full.viewed'] = true;
           }
 
           if (session.annual && !session.annual.viewed && (now - session.annual.savedAt) < RECOVERY_WINDOW) {
@@ -273,7 +318,16 @@ const App: React.FC = () => {
           }
         }).catch(() => {});
 
-        return () => { unsubscribeUser(); unsubscribeArchives(); unsubscribeInbox(); };
+        // 관리자 전용: 미열람 신고 실시간 감지
+        let unsubscribeReports = () => {};
+        if (ADMIN_UIDS.includes(user.uid)) {
+          const reportsQ = query(collection(db, 'reports'), where('isReadByAdmin', '==', false), fsLimit(1));
+          unsubscribeReports = onSnapshot(reportsQ, snap => {
+            setHasNewReports(!snap.empty);
+          });
+        }
+
+        return () => { unsubscribeUser(); unsubscribeArchives(); unsubscribeInbox(); unsubscribeReports(); };
       } else {
         setCurrentUser(null);
         setProfile(null);
@@ -334,8 +388,12 @@ const App: React.FC = () => {
   const saveToArchive = async (type: 'divine' | 'scientific' | 'annual', data: any) => {
     if (!currentUser) return;
     const recordId = Math.random().toString(36).substr(2, 9);
-    const newRecord: SavedFortune = { id: recordId, timestamp: Date.now(), type, data };
-    await setDoc(doc(db, "users", currentUser.uid, "archives", recordId), newRecord);
+    // JSON 직렬화로 undefined 필드 제거 (Firestore는 undefined 값 불허 — 동기 throw 발생)
+    const sanitized = JSON.parse(JSON.stringify(data));
+    const newRecord: SavedFortune = { id: recordId, timestamp: Date.now(), type, data: sanitized };
+    try {
+      await setDoc(doc(db, "users", currentUser.uid, "archives", recordId), newRecord).catch(() => {});
+    } catch {}
   };
 
   const deleteArchive = async (id: string) => {
@@ -344,7 +402,17 @@ const App: React.FC = () => {
     onToast("서고의 기록이 영구 소멸되었습니다.");
   };
 
-  const handleGoogleLogin = async () => await loginWithGoogle();
+  const handleGoogleLogin = async () => {
+    const user = await loginWithGoogle();
+    if (user) {
+      // 로그인 화면에서 약관 동의 후 진행했으므로 동의 시각 저장
+      const userDocRef = doc(db, "users", user.uid);
+      updateDoc(userDocRef, { termsAcceptedAt: Date.now() }).catch(() =>
+        setDoc(userDocRef, { termsAcceptedAt: Date.now() }, { merge: true })
+      );
+      setTermsAccepted(true);
+    }
+  };
   const handleWithdrawAction = async () => { if (!currentUser) return; await logout(); setProfile(null); setView('main'); window.location.reload(); };
 
   // --- End Firebase Sync Logic ---
@@ -362,7 +430,7 @@ const App: React.FC = () => {
   );
 
   const checkDailyLimit = (): boolean => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getKSTDateString();
     if (orb.lastExtractDate !== today) {
       setOrb({ ...orb, dailyExtractCount: 0, lastExtractDate: today });
       return true;
@@ -378,52 +446,37 @@ const App: React.FC = () => {
   const updateFavorites = (roomIds: string[]) => setOrb({ ...orb, favoriteRoomIds: roomIds });
 
 
-  const addPoints = async (amount: number) => {
-    if (!currentUser) return;
-    await updateDoc(doc(db, "users", currentUser.uid), { "orb.points": increment(amount) });
-    // onSnapshot이 최신 포인트를 자동으로 반영
+
+  const buyDecoration = (id: string) => {
+    setOrb((prev: OrbState) => ({
+      ...prev,
+      activeDecorationId: id,
+      purchasedDecorationIds: prev.purchasedDecorationIds.includes(id)
+        ? prev.purchasedDecorationIds
+        : [...prev.purchasedDecorationIds, id],
+    }));
+    onToast("기운의 형상을 변경하였습니다.");
   };
 
-  const buyDecoration = async (id: string, price: number) => {
-    if (orb.purchasedDecorationIds.includes(id)) {
-      setOrb({ ...orb, activeDecorationId: id });
-      onToast("기운의 형상을 변경하였습니다.");
-      return;
-    }
-    if (orb.points < price) {
-      onToast("장식을 획득하기 위한 루멘이 부족합니다.");
-      return;
-    }
+  const handleOfferAmount = async (amount: number) => {
+    if (isOfferingLoading) return;
+    setIsOfferingLoading(true);
     try {
-      await spendPoints(price, `decoration_${id}`);
-      setOrb((prev: OrbState) => ({
-        ...prev,
-        purchasedDecorationIds: [...prev.purchasedDecorationIds, id],
-        activeDecorationId: id
-      }));
-      onToast("새로운 기운의 장식을 획득하였습니다!");
-    } catch (err: any) {
-      onToast(err?.message?.includes("루멘이 부족") ? "루멘이 부족합니다." : "장식 구매에 실패했습니다.");
-    }
-  };
-
-  const handleOfferAmount = (amount: number) => {
-    const rand = Math.random();
-    let multiplier = 1;
-    if (rand > 0.95) multiplier = 10;
-    else if (rand > 0.8) multiplier = 5;
-    else if (rand > 0.5) multiplier = 2;
-    setOfferingData({ amount, multiplier });
-  };
-
-  const handleOfferingComplete = async () => {
-    if (offeringData) {
-      const totalLumen = offeringData.amount * OFFERING_CONVERSION_RATE * offeringData.multiplier;
-      await addPoints(totalLumen);
+      const { multiplier, totalLumen } = await performOffering(amount);
+      setOfferingData({ amount, multiplier });
+      // 루멘은 서버에서 이미 지급됨 — growOrb만 클라이언트에서 처리
       growOrb(Math.floor(totalLumen / 100));
       onToast(`${totalLumen.toLocaleString()} L 의 기운을 하사받았습니다.`);
-      setOfferingData(null);
+    } catch (e: unknown) {
+      const msg = (e as { message?: string })?.message ?? '봉헌에 실패했습니다.';
+      onToast(msg);
+    } finally {
+      setIsOfferingLoading(false);
     }
+  };
+
+  const handleOfferingComplete = () => {
+    setOfferingData(null);
   };
 
   const handleSlotResult = (numbers: number[]) => growOrb(2);
@@ -446,7 +499,9 @@ const App: React.FC = () => {
     try {
       // 포인트 차감은 Cloud Function 내부에서 서버사이드 처리
       const res = await getFortuneAndNumbers(profile);
+      const divineSavedAtNow = Date.now();
       setResult(res);
+      setDivineSavedAt(divineSavedAtNow);
       // 결과 수신 성공 → 세션 viewed 처리 (복구 방지)
       if (currentUser) {
         updateDoc(doc(db, "users", currentUser.uid, "session", "data"), { "divine.viewed": true }).catch(() => {});
@@ -472,15 +527,29 @@ const App: React.FC = () => {
     setScienceLoading(true);
     try {
       // 포인트 차감은 Cloud Function(getScientificReport) 내부에서 서버사이드 처리
-      const res = await getScientificRecommendation(pendingScienceConfig);
+      const resRaw = await getScientificRecommendation(pendingScienceConfig);
+      const res: ScientificAnalysisResult = { ...resRaw, savedAt: Date.now(), benfordApplied: pendingScienceConfig.applyBenfordLaw };
       setScientificResult(res);
+      if (currentUser) {
+        try {
+          // Firestore는 undefined 불허 → additionalSets 없을 때 키 자체를 제외
+          const { additionalSets, ...resCore } = res;
+          setDoc(doc(db, "users", currentUser.uid, "session", "data"), {
+            science_full: {
+              data: { ...resCore, ...(additionalSets !== undefined ? { additionalSets } : {}) },
+              savedAt: res.savedAt,
+              viewed: false,
+            }
+          }, { merge: true }).catch(() => {});
+        } catch {}
+      }
       await saveToArchive('scientific', res);
       growOrb(30);
       onToast("지성 분석 리포트가 도출되었습니다.");
     } catch (err: any) {
       const msg = err?.message?.includes("루멘이 부족")
         ? "루멘이 부족합니다."
-        : "분석 엔진 가동에 오류가 발생했습니다.";
+        : "분析 엔진 가동에 오류가 발생했습니다.";
       onToast(msg);
     } finally {
       setScienceLoading(false);
@@ -567,7 +636,7 @@ const App: React.FC = () => {
 
   // 구슬 탭: 하루 최대 0.5레벨(50 exp) 한도
   const handleOrbTap = () => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getKSTDateString();
     const isNewDay = orb.lastExtractDate !== today;
     const tapExp = isNewDay ? 0 : (orb.dailyOrbTapExp ?? 0);
     if (tapExp >= 50) {
@@ -586,7 +655,7 @@ const App: React.FC = () => {
 
   // 회람판 글 작성 경험치: 하루 최대 5회(0.5레벨) 한도
   const handlePostCreated = () => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getKSTDateString();
     const isNewDay = orb.lastExtractDate !== today;
     const postCount = isNewDay ? 0 : (orb.dailyPostCount ?? 0);
     if (postCount >= 5) return;
@@ -599,22 +668,57 @@ const App: React.FC = () => {
   };
 
   if (!currentUser) {
+    const canLogin = loginAgreedTerms && loginAgreedPrivacy;
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-[#020617]">
+        {showTermsModal && <LegalModal title="이용약관" subtitle="Terms of Service" onClose={() => setShowTermsModal(false)}><TermsContent /></LegalModal>}
+        {showPrivacyModal && <LegalModal title="개인정보처리방침" subtitle="Privacy Policy" onClose={() => setShowPrivacyModal(false)}><PrivacyContent /></LegalModal>}
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_rgba(30,58,138,0.2),_transparent)] pointer-events-none"></div>
-        <div className="relative z-10 glass p-10 rounded-[3rem] w-full max-w-lg space-y-10 animate-in fade-in zoom-in duration-700 shadow-2xl border-white/5 text-center">
+        <div className="relative z-10 glass p-10 rounded-[3rem] w-full max-w-lg space-y-8 animate-in fade-in zoom-in duration-700 shadow-2xl border-white/5 text-center">
           <div className="space-y-3">
             <h1 className="text-5xl font-mystic font-bold text-transparent bg-clip-text bg-gradient-to-b from-indigo-200 via-indigo-400 to-indigo-600 tracking-tighter uppercase">Mystic Lotto</h1>
             <p className="text-slate-500 text-[10px] font-black tracking-[0.6em] uppercase">Fate & Resonance</p>
           </div>
-          <div className="p-8 bg-indigo-500/10 border border-indigo-500/20 rounded-3xl space-y-6">
-             <p className="text-sm text-indigo-300 font-bold">당신의 운명을 클라우드에 영구히 동기화하기 위해<br/>접속 방법을 선택하십시오.</p>
-             <div className="space-y-4">
-                <button onClick={handleGoogleLogin} className="w-full py-4 bg-white text-slate-950 font-black rounded-2xl shadow-xl flex items-center justify-center space-x-3 hover:bg-slate-100 transition-all active:scale-95">
-                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="google" />
-                  <span>Google 계정으로 시작</span>
-                </button>
-             </div>
+
+          {/* 약관 동의 */}
+          <div className="bg-white/[0.03] border border-white/10 rounded-2xl p-5 space-y-4 text-left">
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">서비스 이용을 위해 아래 항목에 동의해 주세요</p>
+            <label className="flex items-start space-x-3 cursor-pointer group">
+              <div
+                onClick={() => setLoginAgreedTerms(!loginAgreedTerms)}
+                className={`w-5 h-5 shrink-0 rounded-md border-2 flex items-center justify-center transition-all mt-0.5 ${loginAgreedTerms ? 'bg-indigo-600 border-indigo-500' : 'border-slate-600 group-hover:border-slate-400'}`}
+              >
+                {loginAgreedTerms && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+              </div>
+              <span className="text-xs text-slate-300 leading-relaxed" onClick={() => setLoginAgreedTerms(!loginAgreedTerms)}>
+                (필수) <button type="button" onClick={e => { e.stopPropagation(); setShowTermsModal(true); }} className="text-indigo-400 underline underline-offset-2 hover:text-indigo-300">이용약관</button>에 동의합니다.
+              </span>
+            </label>
+            <label className="flex items-start space-x-3 cursor-pointer group">
+              <div
+                onClick={() => setLoginAgreedPrivacy(!loginAgreedPrivacy)}
+                className={`w-5 h-5 shrink-0 rounded-md border-2 flex items-center justify-center transition-all mt-0.5 ${loginAgreedPrivacy ? 'bg-indigo-600 border-indigo-500' : 'border-slate-600 group-hover:border-slate-400'}`}
+              >
+                {loginAgreedPrivacy && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+              </div>
+              <span className="text-xs text-slate-300 leading-relaxed" onClick={() => setLoginAgreedPrivacy(!loginAgreedPrivacy)}>
+                (필수) <button type="button" onClick={e => { e.stopPropagation(); setShowPrivacyModal(true); }} className="text-indigo-400 underline underline-offset-2 hover:text-indigo-300">개인정보처리방침</button>에 동의합니다.
+              </span>
+            </label>
+            <p className="text-[10px] text-slate-600 text-center pt-1">본 서비스는 만 19세 이상 성인만 이용할 수 있습니다.</p>
+          </div>
+
+          {/* 로그인 버튼 */}
+          <div className="space-y-3">
+            <button
+              onClick={handleGoogleLogin}
+              disabled={!canLogin}
+              className={`w-full py-4 font-black rounded-2xl shadow-xl flex items-center justify-center space-x-3 transition-all active:scale-95 ${canLogin ? 'bg-white text-slate-950 hover:bg-slate-100' : 'bg-white/20 text-slate-500 cursor-not-allowed'}`}
+            >
+              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className={`w-5 h-5 ${!canLogin && 'opacity-40'}`} alt="google" />
+              <span>Google 계정으로 시작</span>
+            </button>
+            {!canLogin && <p className="text-[10px] text-slate-600 text-center">약관에 동의하셔야 시작할 수 있습니다.</p>}
           </div>
         </div>
       </div>
@@ -626,8 +730,61 @@ const App: React.FC = () => {
   }
 
 
+  // 약관 동의 저장 핸들러 (기존 유저용)
+  const handleAcceptTerms = () => {
+    const userDocRef = doc(db, "users", currentUser.uid);
+    updateDoc(userDocRef, { termsAcceptedAt: Date.now() }).catch(() =>
+      setDoc(userDocRef, { termsAcceptedAt: Date.now() }, { merge: true })
+    );
+    setTermsAccepted(true);
+  };
+
   return (
     <div className="h-screen flex flex-col bg-[#020617] text-slate-200 overflow-x-hidden">
+      {/* 약관 모달 */}
+      {showTermsModal && <LegalModal title="이용약관" subtitle="Terms of Service" onClose={() => setShowTermsModal(false)}><TermsContent /></LegalModal>}
+      {showPrivacyModal && <LegalModal title="개인정보처리방침" subtitle="Privacy Policy" onClose={() => setShowPrivacyModal(false)}><PrivacyContent /></LegalModal>}
+
+      {/* 기존 유저 약관 동의 오버레이 (termsAcceptedAt 없는 경우) */}
+      {termsAccepted === false && (
+        <div className="fixed inset-0 z-[9500] flex items-center justify-center px-5 bg-[#020617]">
+          <div className="w-full max-w-md glass rounded-[2.5rem] border border-white/10 shadow-[0_50px_120px_rgba(0,0,0,0.9)] overflow-hidden animate-in fade-in zoom-in-95 duration-400">
+            <div className="bg-gradient-to-b from-indigo-900/60 to-transparent px-8 pt-8 pb-6 text-center">
+              <div className="text-4xl mb-3">📜</div>
+              <h2 className="text-xl font-mystic font-black text-white tracking-widest uppercase mb-1">약관 동의</h2>
+              <p className="text-[10px] text-indigo-400 font-black uppercase tracking-[0.4em]">서비스 이용을 위해 동의가 필요합니다</p>
+            </div>
+            <div className="px-8 pb-8 space-y-5">
+              <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-5 space-y-4">
+                <label className="flex items-start space-x-3 cursor-pointer group">
+                  <div onClick={() => setOverlayAgreedTerms(!overlayAgreedTerms)} className={`w-5 h-5 shrink-0 rounded-md border-2 flex items-center justify-center transition-all mt-0.5 ${overlayAgreedTerms ? 'bg-indigo-600 border-indigo-500' : 'border-slate-600 group-hover:border-slate-400'}`}>
+                    {overlayAgreedTerms && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                  </div>
+                  <span className="text-xs text-slate-300 leading-relaxed" onClick={() => setOverlayAgreedTerms(!overlayAgreedTerms)}>
+                    (필수) <button type="button" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setShowTermsModal(true); }} className="text-indigo-400 underline underline-offset-2">이용약관</button>에 동의합니다.
+                  </span>
+                </label>
+                <label className="flex items-start space-x-3 cursor-pointer group">
+                  <div onClick={() => setOverlayAgreedPrivacy(!overlayAgreedPrivacy)} className={`w-5 h-5 shrink-0 rounded-md border-2 flex items-center justify-center transition-all mt-0.5 ${overlayAgreedPrivacy ? 'bg-indigo-600 border-indigo-500' : 'border-slate-600 group-hover:border-slate-400'}`}>
+                    {overlayAgreedPrivacy && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                  </div>
+                  <span className="text-xs text-slate-300 leading-relaxed" onClick={() => setOverlayAgreedPrivacy(!overlayAgreedPrivacy)}>
+                    (필수) <button type="button" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setShowPrivacyModal(true); }} className="text-indigo-400 underline underline-offset-2">개인정보처리방침</button>에 동의합니다.
+                  </span>
+                </label>
+                <p className="text-[10px] text-slate-600 text-center">본 서비스는 만 19세 이상 성인만 이용할 수 있습니다.</p>
+              </div>
+              <button
+                onClick={() => { if (overlayAgreedTerms && overlayAgreedPrivacy) handleAcceptTerms(); }}
+                className={`w-full py-4 font-black rounded-2xl uppercase tracking-widest text-sm transition-all ${overlayAgreedTerms && overlayAgreedPrivacy ? 'bg-indigo-600 text-white hover:bg-indigo-500 active:scale-95' : 'bg-white/10 text-slate-600 cursor-not-allowed'}`}
+              >
+                동의하고 시작하기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 프리미엄 연간 리포트 모달 */}
       {showFullAnnualReport && currentDestiny && (
         <AnnualReportModal
@@ -668,7 +825,7 @@ const App: React.FC = () => {
       )}
 
       {view === 'square' && <CelestialSquare profile={profile} orb={orb} onUpdatePoints={updatePoints} onUpdateFavorites={updateFavorites} onBack={() => setView('main')} onToast={onToast} onGrowFromPost={handlePostCreated} isAdmin={isAdmin} lumenReceivedAt={lumenReceivedAt} />}
-      {view === 'profile' && <UserProfilePage profile={profile} orb={orb} archives={archives} onUpdateProfile={onUpdateProfile} onUpdateOrb={onUpdateOrb} onWithdraw={handleWithdrawAction} onBack={() => setView('main')} onToast={onToast} isAdmin={isAdmin} subAdminConfig={subAdminConfig} onSubAdminConfigChange={setSubAdminConfig} onDeleteArchive={deleteArchive} />}
+      {view === 'profile' && <UserProfilePage profile={profile} orb={orb} archives={archives} onUpdateProfile={onUpdateProfile} onUpdateOrb={onUpdateOrb} onWithdraw={handleWithdrawAction} onBack={() => setView('main')} onToast={onToast} isAdmin={isAdmin} subAdminConfig={subAdminConfig} onSubAdminConfigChange={setSubAdminConfig} onDeleteArchive={deleteArchive} hasNewReports={hasNewReports} onClearReportsBadge={() => setHasNewReports(false)} />}
       {view === 'analysis' && <MysticAnalysisLab lottoHistory={lottoHistory} onBack={() => setView('main')} />}
       {offeringData && <DivineEffect amount={offeringData.amount} multiplier={offeringData.multiplier} onComplete={handleOfferingComplete} />}
       {toast && (<div className="fixed inset-0 flex items-center justify-center z-[6000] pointer-events-none px-6"><div className="bg-slate-900/40 backdrop-blur-3xl text-white px-12 py-7 rounded-[2.5rem] shadow-[0_40px_100px_rgba(0,0,0,0.8)] border border-white/10 text-center animate-in zoom-in-95 duration-500 max-w-md"><p className="text-xl font-bold leading-tight whitespace-pre-line">{toast}</p></div></div>)}
@@ -710,8 +867,16 @@ const App: React.FC = () => {
         </div>
         <div className="flex items-center space-x-6 text-right relative">
           <button onClick={() => setView('profile')} className="hover:bg-white/5 p-2 rounded-xl group flex items-center space-x-4">
-             <div className="text-right"><p className="text-[10px] text-slate-500 uppercase font-black">Fortune Seeker</p><p className="text-base font-black text-white group-hover:text-indigo-400 transition-colors">{orb.nickname || profile.name}님</p></div>
-             <OrbVisual level={orb.level} className="w-8 h-8 border border-white/10 group-hover:border-indigo-500/50 transition-all" />
+             <div className="text-right relative">
+               <p className="text-[10px] text-slate-500 uppercase font-black">Fortune Seeker</p>
+               <p className="text-base font-black text-white group-hover:text-indigo-400 transition-colors inline-flex items-center gap-1.5">
+                 {orb.nickname || profile.name}님
+                 {(orb.mailbox?.some(m => !m.isRead) || (isAdmin && hasNewReports)) && (
+                   <span className="inline-block w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
+                 )}
+               </p>
+             </div>
+             <OrbVisual level={orb.level} className="w-8 h-8 border border-white/10 group-hover:border-indigo-500/50 transition-all" overlayAnimation={getActiveDecoration(orb).overlayAnimation} />
           </button>
           <div className="relative">
             <button onClick={() => setShowMenu(!showMenu)} className="w-10 h-10 rounded-xl border border-slate-800 flex flex-col items-center justify-center space-y-1 hover:bg-white/5 text-white">
@@ -723,6 +888,7 @@ const App: React.FC = () => {
                 <div className="absolute top-full right-0 mt-2 w-56 bg-[#020617] p-2 rounded-2xl border border-white/10 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-200">
                   <button onClick={() => { setView('square'); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-indigo-600/20 text-indigo-100 text-xs font-black uppercase transition-all"><span>🌌</span><span>천상의 광장 가기</span></button>
                   <button onClick={() => { setView('analysis'); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-cyan-600/20 text-cyan-100 text-xs font-black uppercase transition-all"><span>📊</span><span>미스틱 분석 제단</span></button>
+                  <button onClick={() => { setActiveTab('shop'); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-emerald-600/20 text-emerald-100 text-xs font-black uppercase transition-all"><span>💎</span><span>충전하기</span></button>
                   <button onClick={() => { setShowMiningModal(true); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-yellow-600/20 text-yellow-100 text-xs font-black uppercase transition-all"><span>⛏️</span><span>루멘 채굴</span></button>
                   {isAdmin && (
                     <button onClick={() => { setIsAdminModalOpen(true); setShowMenu(false); }} className="w-full p-4 flex items-center space-x-3 rounded-xl hover:bg-amber-600/20 text-amber-100 text-xs font-black uppercase transition-all"><span>🎫</span><span>당첨번호 등록 (Admin)</span></button>
@@ -750,27 +916,31 @@ const App: React.FC = () => {
           <div className="space-y-24">
             <section className="relative flex flex-col items-center animate-in fade-in duration-700">
               <FortuneOrb orb={orb} onGrow={handleOrbTap} />
-              <button onClick={() => setShowShop(!showShop)} className="mt-10 px-10 py-4 bg-indigo-500/10 border-2 border-indigo-500/30 rounded-full text-sm font-black text-indigo-200 hover:bg-indigo-500/20 transition-all flex items-center space-x-3 shadow-2xl backdrop-blur-xl"><span>✨</span><span className="tracking-[0.2em] uppercase">신비의 상점</span><span className="bg-indigo-500 text-white px-3 py-1 rounded-full text-[10px] ml-4">{displayPoints(orb.points)} L</span></button>
+              <button onClick={() => setShowShop(!showShop)} className="mt-10 px-10 py-4 bg-indigo-500/10 border-2 border-indigo-500/30 rounded-full text-sm font-black text-indigo-200 hover:bg-indigo-500/20 transition-all flex items-center space-x-3 shadow-2xl backdrop-blur-xl"><span>✦</span><span className="tracking-[0.2em] uppercase">기운 각인</span></button>
               {showShop && (
-                <div className="absolute top-28 right-0 md:right-1/2 md:translate-x-1/2 w-80 glass p-8 rounded-[3rem] z-40 border-indigo-500/40 shadow-2xl animate-in fade-in zoom-in duration-300 max-h-[60vh] overflow-y-auto">
-                  <div className="space-y-3">
-                    {ORB_DECORATIONS.map(item => (
-                      <button key={item.id} onClick={() => buyDecoration(item.id, item.price)} className={`w-full p-4 rounded-2xl border-2 text-left flex justify-between items-center transition-all ${orb.activeDecorationId === item.id ? 'border-indigo-500 bg-indigo-500/20' : 'border-slate-800 bg-slate-900/40'}`}>
-                        <div><p className="text-xs font-black text-white">{item.name}</p><p className="text-[10px] font-bold text-slate-500">{item.price === 0 ? 'DEFAULT' : `${item.price.toLocaleString()} L`}</p></div>
-                        {orb.activeDecorationId === item.id && <span className="text-indigo-400 font-black">✓</span>}
-                      </button>
-                    ))}
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setShowShop(false)} />
+                  <div className="absolute top-28 right-0 md:right-1/2 md:translate-x-1/2 w-64 glass p-5 rounded-[2rem] z-40 border-indigo-500/40 shadow-2xl animate-in fade-in zoom-in duration-300 max-h-[55vh] overflow-y-auto">
+                    <div className="space-y-2">
+                      {ORB_DECORATIONS.map(item => (
+                        <button key={item.id} onClick={() => buyDecoration(item.id)} className={`w-full px-4 py-3 rounded-xl border text-left flex items-center space-x-3 transition-all ${orb.activeDecorationId === item.id ? 'border-indigo-500 bg-indigo-500/20' : 'border-slate-800 bg-slate-900/40 hover:border-slate-600'}`}>
+                          <div className="w-4 h-4 rounded-full shrink-0 ring-1 ring-white/20" style={{ background: item.color || '#6366f1' }} />
+                          <p className="text-xs font-black text-white flex-1">{item.name}</p>
+                          {orb.activeDecorationId === item.id && <span className="text-indigo-400 font-black text-sm">✓</span>}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                </>
               )}
             </section>
             <section className="space-y-16 border-t border-white/5 pt-20">
-              <LottoGenerator result={result} loading={loading} onGenerate={onDivineGenerateClick} onSlotGenerate={handleSlotResult} onReset={() => setResult(null)} hasExtractedToday={hasExtractedDivineToday} />
+              <LottoGenerator result={result} savedAt={divineSavedAt} loading={loading} onGenerate={onDivineGenerateClick} onSlotGenerate={handleSlotResult} onReset={() => { setResult(null); setDivineSavedAt(null); }} hasExtractedToday={hasExtractedDivineToday} />
             </section>
           </div>
         )}
 
-        {activeTab === 'science' && (<section className="animate-in fade-in duration-700"><ScientificAnalysis loading={scienceLoading} result={scienceResult} onGenerate={onScienceGenerateClick} lottoHistory={lottoHistory} /></section>)}
+        {activeTab === 'science' && (<section className="animate-in fade-in duration-700"><ScientificAnalysis loading={scienceLoading} result={scienceResult} onGenerate={onScienceGenerateClick} lottoHistory={lottoHistory} uid={currentUser?.uid} /></section>)}
         {activeTab === 'treasury' && (
           <section className="flex flex-col items-center space-y-16 animate-in fade-in duration-700">
              <div className="text-center relative"><h2 className="text-4xl font-mystic font-black text-yellow-500 tracking-[0.6em] mb-4 uppercase">Sacred Vault</h2></div>
@@ -799,15 +969,343 @@ const App: React.FC = () => {
              </div>
           </section>
         )}
-        {activeTab === 'offering' && <section className="flex flex-col items-center animate-in fade-in duration-700"><SacredOffering onOffer={handleOfferAmount} /></section>}
+        {activeTab === 'offering' && <section className="flex flex-col items-center animate-in fade-in duration-700"><SacredOffering onOffer={handleOfferAmount} level={orb.level} /></section>}
+
+        {activeTab === 'shop' && (
+          <section className="flex flex-col items-center animate-in fade-in duration-700 max-w-2xl mx-auto w-full space-y-8 pb-16">
+            {/* 헤더 */}
+            <div className="text-center space-y-3 pt-4">
+              <div className="inline-flex items-center space-x-3 bg-emerald-500/10 border border-emerald-500/30 px-5 py-2 rounded-full">
+                <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Coming Soon</span>
+              </div>
+              <h2 className="text-4xl font-mystic font-black text-white tracking-[0.4em] uppercase">Nadir Shop</h2>
+              <p className="text-slate-500 text-xs font-bold">나디르 충전 서비스가 준비 중입니다</p>
+              <p className="text-rose-400/80 text-[10px] font-bold mt-1">표시된 가격은 부가세(VAT 10%)가 포함된 최종 결제금액입니다.</p>
+            </div>
+
+            {/* 단건 충전 플랜 */}
+            <div className="w-full glass rounded-[2rem] border border-white/5 overflow-hidden">
+              <div className="px-6 py-4 border-b border-white/5 flex items-center space-x-3">
+                <span className="text-lg">💎</span>
+                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">나디르 충전</h3>
+                <span className="ml-auto text-[9px] font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full uppercase">준비 중</span>
+              </div>
+              <div className="p-4 space-y-3">
+                {[
+                  { price: '1,000원',  base: '1,000',  bonus: null,      lidAngle: 5,  scale: 0.72, innerCoins: false, coins: [] as number[][],                                                                      border: 'border-white/10',       bg: 'bg-white/[0.02]',      glow: 'drop-shadow(0 0 4px rgba(255,255,255,0.12))' },
+                  { price: '5,000원',  base: '5,000',  bonus: '500',     lidAngle: 22, scale: 0.86, innerCoins: false, coins: [[-15,-6],[13,-9]] as number[][],                                                       border: 'border-emerald-500/20', bg: 'bg-emerald-500/[0.03]', glow: 'drop-shadow(0 0 7px rgba(52,211,153,0.45))' },
+                  { price: '10,000원', base: '10,000', bonus: '2,000',   lidAngle: 44, scale: 1.0,  innerCoins: true,  coins: [[-17,-4],[15,-8],[-9,-17],[11,-15]] as number[][],                                     border: 'border-amber-500/25',   bg: 'bg-amber-500/[0.04]',  glow: 'drop-shadow(0 0 10px rgba(245,158,11,0.5))' },
+                  { price: '30,000원', base: '30,000', bonus: '10,000',  lidAngle: 70, scale: 1.18, innerCoins: true,  coins: [[-19,-2],[17,-5],[-13,-15],[15,-17],[-5,-21],[9,-11],[1,-19]] as number[][],            border: 'border-amber-400/40',   bg: 'bg-amber-500/[0.07]',  glow: 'drop-shadow(0 0 16px rgba(251,191,36,0.7))' },
+                ].map((plan, i) => {
+                  const bodyY = 22, lidH = 14, lidY = bodyY - lidH;
+                  const sw = Math.round(44 * plan.scale), sh = Math.round(40 * plan.scale);
+                  return (
+                    <div key={i} className={`relative flex items-center justify-between px-5 py-3 rounded-2xl border ${plan.border} ${plan.bg} overflow-visible`} style={{ minHeight: 80 }}>
+                      {/* 가격 */}
+                      <p className="text-sm font-black text-white whitespace-nowrap">{plan.price}</p>
+                      {/* 보물함 + 나디르 */}
+                      <div className="flex items-center gap-2">
+                        {/* 보물함 SVG */}
+                        <div className="relative flex-shrink-0" style={{ width: sw + 24, height: sh + 20 }}>
+                          <svg viewBox="0 0 44 40" width={sw} height={sh} style={{ filter: plan.glow, position: 'absolute', left: 12, top: 10 }}>
+                            {/* 함체 */}
+                            <rect x="1" y={bodyY} width="42" height="17" rx="3" fill="#3d1f0a" stroke="#6b3818" strokeWidth="1.2"/>
+                            <rect x="1" y={bodyY+7} width="42" height="2.5" fill="#5a2e10" opacity="0.8"/>
+                            {/* 리벳 */}
+                            <circle cx="5"  cy={bodyY+3}  r="1.5" fill="#6b3818"/>
+                            <circle cx="39" cy={bodyY+3}  r="1.5" fill="#6b3818"/>
+                            <circle cx="5"  cy={bodyY+14} r="1.5" fill="#6b3818"/>
+                            <circle cx="39" cy={bodyY+14} r="1.5" fill="#6b3818"/>
+                            {/* 자물쇠 */}
+                            <rect x="19" y={bodyY+3} width="6" height="5.5" rx="1.5" fill="#d4af37" stroke="#b09020" strokeWidth="0.8"/>
+                            <circle cx="22" cy={bodyY+5.8} r="1.2" fill="#8a6010"/>
+                            {/* 내부 (뚜껑 열렸을 때) */}
+                            {plan.innerCoins && (
+                              <>
+                                <rect x="3" y={bodyY+1} width="38" height="10" fill="#1e0801" opacity="0.9"/>
+                                <circle cx="13" cy={bodyY+5.5} r="3.2" fill="#f59e0b"/>
+                                <circle cx="22" cy={bodyY+5}   r="2.8" fill="#fbbf24"/>
+                                <circle cx="31" cy={bodyY+5.5} r="2.4" fill="#f59e0b"/>
+                                {i === 3 && (
+                                  <>
+                                    <polygon points="17,0 19.5,5 22,0 19.5,-5" fill="#a78bfa" transform={`translate(0,${bodyY+1})`}/>
+                                    <polygon points="9,0 11.5,5 14,0 11.5,-5"  fill="#34d399" transform={`translate(0,${bodyY+2})`}/>
+                                  </>
+                                )}
+                              </>
+                            )}
+                            {/* 뚜껑 (힌지 기준 회전) */}
+                            <g transform={`rotate(-${plan.lidAngle}, 22, ${bodyY})`}>
+                              <rect x="1" y={lidY} width="42" height={lidH} rx="3" fill="#5a2e10" stroke="#8a4a1a" strokeWidth="1.2"/>
+                              <rect x="1" y={lidY+lidH-4} width="42" height="2.5" fill="#7a3c18" opacity="0.7"/>
+                              <rect x="3" y={lidY+1.5}    width="38" height="3"   rx="1.5" fill="#7a3c18" opacity="0.35"/>
+                              <circle cx="5"  cy={lidY+3} r="1.5" fill="#8a4a1a"/>
+                              <circle cx="39" cy={lidY+3} r="1.5" fill="#8a4a1a"/>
+                            </g>
+                          </svg>
+                          {/* 주변 코인/보석 */}
+                          {plan.coins.map((pos, ci) => (
+                            <span key={ci} className="absolute text-[10px] leading-none pointer-events-none animate-bounce" style={{ left: `calc(50% + ${pos[0]}px)`, top: `calc(50% + ${pos[1]}px)`, animationDelay: `${ci * 0.18}s`, animationDuration: `${1.1 + (ci % 3) * 0.25}s` }}>
+                              {ci % 3 === 0 ? '🪙' : ci % 3 === 1 ? '💎' : '✨'}
+                            </span>
+                          ))}
+                        </div>
+                        {/* 나디르 텍스트 */}
+                        <div className="text-right">
+                          <p className="font-black text-amber-400" style={{ fontSize: 13 + i * 0.8 }}>
+                            {plan.base}
+                            {plan.bonus && <span className="text-emerald-400"> + {plan.bonus}</span>}
+                            <span className="text-xs text-amber-400/80 ml-0.5">나디르</span>
+                          </p>
+                          {plan.bonus && <p className="text-[10px] text-emerald-400/70 font-bold">기본 {plan.base} + 추가혜택 {plan.bonus}</p>}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 구독 플랜 */}
+            <div className="w-full glass rounded-[2rem] border border-white/5 overflow-hidden">
+              <div className="px-6 py-4 border-b border-white/5 flex items-center space-x-3">
+                <span className="text-lg">⭐</span>
+                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">구독 플랜</h3>
+                <span className="ml-auto text-[9px] font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full uppercase">준비 중</span>
+              </div>
+              <div className="p-4 space-y-3">
+                {/* 월정액 */}
+                {(() => {
+                  const bodyY = 22, lidH = 14, lidY = bodyY - lidH, sc = 1.05, ang = 48;
+                  const sw = Math.round(44 * sc), sh = Math.round(40 * sc);
+                  const glow = 'drop-shadow(0 0 10px rgba(99,102,241,0.5))';
+                  const coins = [[-16,-4],[14,-8],[-8,-18],[12,-16],[0,-22]] as number[][];
+                  return (
+                    <div className="flex items-center justify-between px-5 py-4 rounded-2xl border border-indigo-500/30 bg-indigo-500/5 overflow-visible">
+                      <div>
+                        <p className="text-sm font-black text-white">월정액</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">매월 자동 갱신</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="relative flex-shrink-0" style={{ width: sw + 24, height: sh + 20 }}>
+                          <svg viewBox="0 0 44 40" width={sw} height={sh} style={{ filter: glow, position: 'absolute', left: 12, top: 10 }}>
+                            <rect x="1" y={bodyY} width="42" height="17" rx="3" fill="#3d1f0a" stroke="#6b3818" strokeWidth="1.2"/>
+                            <rect x="1" y={bodyY+7} width="42" height="2.5" fill="#5a2e10" opacity="0.8"/>
+                            <circle cx="5"  cy={bodyY+3}  r="1.5" fill="#6b3818"/><circle cx="39" cy={bodyY+3}  r="1.5" fill="#6b3818"/>
+                            <circle cx="5"  cy={bodyY+14} r="1.5" fill="#6b3818"/><circle cx="39" cy={bodyY+14} r="1.5" fill="#6b3818"/>
+                            <rect x="19" y={bodyY+3} width="6" height="5.5" rx="1.5" fill="#d4af37" stroke="#b09020" strokeWidth="0.8"/>
+                            <circle cx="22" cy={bodyY+5.8} r="1.2" fill="#8a6010"/>
+                            <rect x="3" y={bodyY+1} width="38" height="10" fill="#1e0801" opacity="0.9"/>
+                            <circle cx="13" cy={bodyY+5.5} r="3.2" fill="#f59e0b"/><circle cx="22" cy={bodyY+5} r="2.8" fill="#fbbf24"/><circle cx="31" cy={bodyY+5.5} r="2.4" fill="#f59e0b"/>
+                            <g transform={`rotate(-${ang}, 22, ${bodyY})`}>
+                              <rect x="1" y={lidY} width="42" height={lidH} rx="3" fill="#5a2e10" stroke="#8a4a1a" strokeWidth="1.2"/>
+                              <rect x="1" y={lidY+lidH-4} width="42" height="2.5" fill="#7a3c18" opacity="0.7"/>
+                              <rect x="3" y={lidY+1.5} width="38" height="3" rx="1.5" fill="#7a3c18" opacity="0.35"/>
+                              <circle cx="5" cy={lidY+3} r="1.5" fill="#8a4a1a"/><circle cx="39" cy={lidY+3} r="1.5" fill="#8a4a1a"/>
+                            </g>
+                          </svg>
+                          {coins.map((pos, ci) => (
+                            <span key={ci} className="absolute text-[10px] leading-none pointer-events-none animate-bounce" style={{ left: `calc(50% + ${pos[0]}px)`, top: `calc(50% + ${pos[1]}px)`, animationDelay: `${ci*0.18}s`, animationDuration: `${1.1+(ci%3)*0.25}s` }}>
+                              {ci%3===0?'🪙':ci%3===1?'💎':'✨'}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="text-right">
+                          <p className="text-base font-black text-amber-400">30,000 나디르<span className="text-slate-500 text-[10px] font-bold">/월</span></p>
+                          <p className="text-[11px] text-indigo-400 font-black">3,900원/월</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+                {/* 연간 구독 */}
+                {(() => {
+                  const bodyY = 22, lidH = 14, lidY = bodyY - lidH, sc = 1.05, ang = 78;
+                  const sw = Math.round(44 * sc), sh = Math.round(40 * sc);
+                  const glow = 'drop-shadow(0 0 18px rgba(251,191,36,0.8))';
+                  const coins = [[-16,-4],[14,-8],[-9,-18],[13,-20],[-4,-24],[10,-14],[2,-22],[-14,-11],[16,-2],[5,-27]] as number[][];
+                  return (
+                    <div className="relative flex items-center justify-between px-5 py-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 overflow-visible">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-black text-white">연간 구독</p>
+                          <span className="text-[8px] font-black bg-amber-500 text-slate-950 px-1.5 py-0.5 rounded-full uppercase tracking-wider leading-none">BEST</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-[8px] font-black bg-rose-600/90 text-white px-1.5 py-0.5 rounded-sm leading-none">10%↓</span>
+                          <p className="text-[10px] text-slate-400">월 3,500원 꼴</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="relative flex-shrink-0" style={{ width: sw + 24, height: sh + 20 }}>
+                          <svg viewBox="0 0 44 40" width={sw} height={sh} style={{ filter: glow, position: 'absolute', left: 12, top: 10 }}>
+                            {/* 황금 테두리 함체 */}
+                            <rect x="1" y={bodyY} width="42" height="17" rx="3" fill="#4a2505" stroke="#d4af37" strokeWidth="1.5"/>
+                            <rect x="1" y={bodyY+7} width="42" height="2.5" fill="#d4af37" opacity="0.4"/>
+                            <circle cx="5"  cy={bodyY+3}  r="1.8" fill="#d4af37"/><circle cx="39" cy={bodyY+3}  r="1.8" fill="#d4af37"/>
+                            <circle cx="5"  cy={bodyY+14} r="1.8" fill="#d4af37"/><circle cx="39" cy={bodyY+14} r="1.8" fill="#d4af37"/>
+                            <rect x="18" y={bodyY+2.5} width="8" height="6.5" rx="2" fill="#fbbf24" stroke="#d4af37" strokeWidth="1"/>
+                            <circle cx="22" cy={bodyY+6} r="1.5" fill="#92400e"/>
+                            {/* 가득 찬 내부 */}
+                            <rect x="3" y={bodyY+1} width="38" height="10" fill="#1e0801" opacity="0.9"/>
+                            <circle cx="10" cy={bodyY+5} r="3.5" fill="#f59e0b"/>
+                            <circle cx="18" cy={bodyY+4} r="3.0" fill="#fbbf24"/>
+                            <circle cx="26" cy={bodyY+5} r="3.2" fill="#f59e0b"/>
+                            <circle cx="34" cy={bodyY+4.5} r="2.8" fill="#fbbf24"/>
+                            <polygon points="22,0 24.5,5 27,0 24.5,-5" fill="#a78bfa" transform={`translate(-8,${bodyY+1})`}/>
+                            <polygon points="22,0 24.5,5 27,0 24.5,-5" fill="#34d399" transform={`translate(2,${bodyY+0})`}/>
+                            <polygon points="22,0 24.5,5 27,0 24.5,-5" fill="#f472b6" transform={`translate(12,${bodyY+1})`}/>
+                            {/* 황금 뚜껑 */}
+                            <g transform={`rotate(-${ang}, 22, ${bodyY})`}>
+                              <rect x="1" y={lidY} width="42" height={lidH} rx="3" fill="#5a2e10" stroke="#d4af37" strokeWidth="1.5"/>
+                              <rect x="1" y={lidY+lidH-4} width="42" height="2.5" fill="#d4af37" opacity="0.35"/>
+                              <rect x="3" y={lidY+1.5} width="38" height="3" rx="1.5" fill="#d4af37" opacity="0.2"/>
+                              <circle cx="5"  cy={lidY+3} r="1.8" fill="#d4af37"/><circle cx="39" cy={lidY+3} r="1.8" fill="#d4af37"/>
+                            </g>
+                          </svg>
+                          {coins.map((pos, ci) => (
+                            <span key={ci} className="absolute leading-none pointer-events-none animate-bounce" style={{ fontSize: ci%4===0?13:10, left: `calc(50% + ${pos[0]}px)`, top: `calc(50% + ${pos[1]}px)`, animationDelay: `${ci*0.14}s`, animationDuration: `${0.9+(ci%4)*0.2}s` }}>
+                              {ci%4===0?'🪙':ci%4===1?'💎':ci%4===2?'✨':'👑'}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="text-right">
+                          <p className="text-base font-black text-amber-400">500,000 나디르<span className="text-slate-500 text-[10px] font-bold">/년</span></p>
+                          <p className="text-[11px] text-amber-400/70 font-black">42,000원/년</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+                <div className="mt-1 px-1 py-3 rounded-2xl bg-white/[0.03] border border-white/5 space-y-1.5 text-center">
+                  <p className="text-[11px] font-black text-slate-400">📋 구독 해지 안내</p>
+                  <p className="text-[10px] text-slate-500 leading-relaxed">
+                    해지는 언제든 신청 가능합니다.<br />
+                    <b className="text-slate-400">해지 신청 즉시 다음 갱신이 취소</b>되며,<br />
+                    현재 구독 기간 <b className="text-slate-400">만료일까지는 정상 이용</b>됩니다.<br />
+                    <span className="text-rose-400/80">이미 결제된 기간의 중도 환급은 제공되지 않습니다.</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* 나디르 설명 */}
+            <div className="w-full glass rounded-[2rem] border border-white/5 overflow-hidden">
+              <div className="px-6 py-4 border-b border-white/5 flex items-center space-x-3">
+                <span className="text-lg">💎</span>
+                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">나디르 (Nadir) — 충전 화폐</h3>
+              </div>
+              <div className="p-6 space-y-3 text-sm text-slate-300 leading-relaxed">
+                <p>• 현금으로 직접 충전하는 기본 화폐입니다.</p>
+                <p>• 천상의 봉헌 제단에서 나디르를 봉헌하면 확률에 따라 <span className="text-amber-400 font-bold">최대 10배의 루멘</span>으로 돌아옵니다.</p>
+                <p>• 나디르는 디지털 재화로, <span className="text-rose-400 font-bold">사용함으로써 상품 가치가 훼손되므로 취소 및 환불이 불가</span>합니다.</p>
+                <p>• 회원 탈퇴 시 <span className="text-slate-400 font-bold">구매일로부터 7일 이내 미사용 나디르</span>는 고객센터를 통해 환불 신청이 가능합니다. 단, 7일이 초과되거나 7일 이내라도 사용된 잔여 나디르는 소멸됩니다.</p>
+              </div>
+            </div>
+
+            {/* 루멘 설명 */}
+            <div className="w-full glass rounded-[2rem] border border-white/5 overflow-hidden">
+              <div className="px-6 py-4 border-b border-white/5 flex items-center space-x-3">
+                <span className="text-lg">✨</span>
+                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">루멘 (Lumen) — 활동 화폐</h3>
+              </div>
+              <div className="p-6 space-y-3 text-sm text-slate-300 leading-relaxed">
+                <p>• 봉헌·출석·활동을 통해 획득하는 앱 내 화폐입니다.</p>
+                <p>• 천기누설, 천명수, 지성분석 등 <span className="text-indigo-400 font-bold">모든 콘텐츠를 루멘으로 이용</span>합니다.</p>
+                <p>• 루멘은 나디르나 현금으로 역환전되지 않으며, <span className="text-rose-400 font-bold">환불이 불가</span>합니다.</p>
+                <p>• 회원 탈퇴 시 잔여 루멘은 소멸됩니다.</p>
+                <p>• 앱 외부에서 취득한 루멘은 <span className="text-rose-400 font-bold">어떠한 경우에도 사용 불가</span>합니다.</p>
+              </div>
+            </div>
+
+            {/* 루멘 획득 방법 */}
+            <div className="w-full glass rounded-[2rem] border border-white/5 overflow-hidden">
+              <div className="px-6 py-4 border-b border-white/5 flex items-center space-x-3">
+                <span className="text-lg">💡</span>
+                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">루멘 획득 방법</h3>
+              </div>
+              <div className="divide-y divide-white/5">
+                {[
+                  { icon: '🏛️', title: '봉헌 제단 봉헌', desc: '나디르 봉헌 시 확률에 따라 1배~10배 루멘 보상 (레벨이 높을수록 고배율 확률 상승)', badge: null },
+                  { icon: '📅', title: '매일 방문 보너스', desc: '앱 방문 시 하루 1회 +100 루멘 지급 (자정 기준 갱신)', badge: null },
+                  { icon: '📺', title: '광고 시청', desc: '편당 +300 루멘, 하루 최대 5회 (1,500 루멘/일)', badge: '준비 중' },
+                  { icon: '🔮', title: '구슬 수련', desc: '구슬 탭 시 EXP 획득 → 레벨 성장 → 봉헌 고배율 확률 상승 (하루 최대 +0.5레벨)', badge: null },
+                  { icon: '📝', title: '회람판 글 작성', desc: '+0.1레벨/편, 하루 최대 5편 (+0.5레벨/일)', badge: null },
+                  { icon: '👍', title: '공명(좋아요) 달성', desc: '내 글이 공명 10개 단위를 넘을 때마다 +0.1레벨 (자기 공명 제외)', badge: null },
+                ].map((item, i) => (
+                  <div key={i} className="flex items-start space-x-4 px-6 py-4">
+                    <span className="text-xl shrink-0 mt-0.5">{item.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center space-x-2 mb-1">
+                        <p className="text-sm font-black text-white">{item.title}</p>
+                        {item.badge && <span className="text-[9px] font-black bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full">{item.badge}</span>}
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-relaxed">{item.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
       </div>
       </main>
+
+      {/* 웰컴 모달 */}
+      {showWelcomeModal && (
+        <div className="fixed inset-0 z-[8000] flex items-center justify-center px-5">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => { setShowWelcomeModal(false); localStorage.setItem('mlotto_welcome_v1', '1'); }} />
+          <div className="relative glass w-full max-w-md rounded-[2.5rem] border border-white/10 shadow-[0_50px_120px_rgba(0,0,0,0.9)] animate-in zoom-in-95 fade-in duration-400 overflow-hidden">
+            {/* 헤더 그라디언트 */}
+            <div className="bg-gradient-to-b from-indigo-900/60 to-transparent px-8 pt-8 pb-6 text-center">
+              <div className="text-5xl mb-3">✨</div>
+              <h2 className="text-2xl font-mystic font-black text-white tracking-widest uppercase mb-1">Mystic Lotto</h2>
+              <p className="text-[10px] text-indigo-400 font-black uppercase tracking-[0.5em]">화폐 시스템 안내</p>
+            </div>
+            <div className="px-8 pb-8 space-y-4">
+              {/* 나디르 */}
+              <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-5 space-y-2">
+                <div className="flex items-center space-x-2 mb-3">
+                  <span className="text-lg">💎</span>
+                  <span className="text-xs font-black text-amber-400 uppercase tracking-widest">나디르 (Nadir) — 충전 화폐</span>
+                </div>
+                <p className="text-[12px] text-slate-300 leading-relaxed">현금으로 충전하는 기본 화폐입니다. 봉헌 제단에서 사용하면 <span className="text-amber-400 font-bold">확률에 따라 최대 10배의 루멘</span>으로 전환됩니다. 디지털 재화 특성상 사용함으로써 상품 가치가 훼손되므로 <span className="text-rose-400 font-bold">취소 및 환불이 불가</span>합니다.</p>
+              </div>
+              {/* 루멘 */}
+              <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-5 space-y-2">
+                <div className="flex items-center space-x-2 mb-3">
+                  <span className="text-lg">✨</span>
+                  <span className="text-xs font-black text-indigo-400 uppercase tracking-widest">루멘 (Lumen) — 활동 화폐</span>
+                </div>
+                <p className="text-[12px] text-slate-300 leading-relaxed">봉헌·출석·활동으로 획득하는 앱 내 화폐입니다. 천기누설·천명수·지성분석 등 <span className="text-indigo-400 font-bold">모든 콘텐츠를 루멘으로 이용</span>합니다. 현금 역환전·환불은 불가합니다.</p>
+              </div>
+              {/* 획득 요약 */}
+              <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-5">
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">💡 루멘 획득 요약</p>
+                <div className="space-y-1.5 text-[11px] text-slate-400">
+                  <p>🏛️ 봉헌 → 확률 보상 (1배~10배)</p>
+                  <p>📅 매일 방문 → +100 루멘</p>
+                  <p>📺 광고 시청 → +300 루멘/편, 최대 5회 <span className="text-amber-500/70">(준비 중)</span></p>
+                  <p>🔮 구슬 수련·글 작성·공명 → 레벨 성장</p>
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-600 text-center">상세 내용은 <span className="text-slate-500 underline underline-offset-2">메뉴 → 충전하기</span>에서 언제든지 확인할 수 있습니다.</p>
+              <button
+                onClick={() => { setShowWelcomeModal(false); localStorage.setItem('mlotto_welcome_v1', '1'); }}
+                className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl uppercase tracking-widest text-sm hover:bg-indigo-500 transition-all active:scale-95"
+              >
+                확인했습니다
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <footer className="relative shrink-0 border-t border-white/10 px-10 py-8 flex items-center justify-between z-[200] shadow-2xl">
         <div className="absolute inset-0 bg-white/[0.02] backdrop-blur-3xl -z-10 pointer-events-none" />
          <div className="flex items-center space-x-8">
             <div className="relative">
-              <OrbVisual level={orb.level} className="w-16 h-16 border-2 border-white/10" />
+              <OrbVisual level={orb.level} className="w-16 h-16 border-2 border-white/10" overlayAnimation={getActiveDecoration(orb).overlayAnimation} />
               <div className="absolute -top-2 -right-2 bg-indigo-600 text-[11px] font-black px-3 py-1 rounded-xl z-10">LV.{orb.level}</div>
             </div>
             <div className="hidden sm:block">

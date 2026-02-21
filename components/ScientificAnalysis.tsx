@@ -1,12 +1,15 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { ScientificAnalysisResult, ScientificFilterConfig } from '../types';
 import { LottoRound } from '../types';
+import { db } from '../services/firebase';
+import { doc, getDoc, setDoc, deleteField } from 'firebase/firestore';
 
 interface ScientificAnalysisProps {
   loading: boolean;
   result: ScientificAnalysisResult | null;
   onGenerate: (config: ScientificFilterConfig) => void;
   lottoHistory: LottoRound[];
+  uid?: string;
 }
 
 const INITIAL_CONFIG: ScientificFilterConfig = {
@@ -23,7 +26,7 @@ const INITIAL_CONFIG: ScientificFilterConfig = {
   carryOverRange: [0, 2],
   neighborRange: [0, 2],
   algorithmMode: 'Standard',
-  applyBenfordLaw: true,
+  applyBenfordLaw: false,
   gameCount: 1,
   fixedNumbers: [],
   excludedNumbers: [],
@@ -31,8 +34,111 @@ const INITIAL_CONFIG: ScientificFilterConfig = {
   coOccurrenceMode: 'off',
 };
 
-const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result, onGenerate, lottoHistory }) => {
-  const [config, setConfig] = useState<ScientificFilterConfig>({ ...INITIAL_CONFIG });
+const INFO_CONTENT: Record<string, { title: string; body: string }> = {
+  benford: {
+    title: '벤포드 적합도',
+    body: '벤포드의 법칙은 자연 발생 수에서 첫 자리 숫자가 1일 확률이 가장 높고(30.1%), 9일 확률이 가장 낮다(4.6%)는 통계 법칙입니다.\n\n⚠️ 로또는 1~45 사이의 균등 분포로 추출되는 인위적 데이터이므로, 벤포드 법칙이 본질적으로 적용되지 않습니다. 이 지표의 활성화는 권장하지 않습니다.\n\n실제 역대 당첨 번호(1~1211회)의 앞자리 출현 빈도:\n• 앞자리 1 — 약 25%\n• 앞자리 2 — 약 24%\n• 앞자리 3 — 약 25%\n• 앞자리 4 — 약 13%\n• 앞자리 5~9 — 각 약 2%\n\n이는 벤포드 이론값(1→30%, 2→18%...)과 크게 다르며, 1~45 구조에서 오는 자연스러운 결과입니다.',
+  },
+  ac: {
+    title: '산술 복잡도 (AC)',
+    body: '산술 복잡도(Arithmetic Complexity)는 6개 번호 사이의 차이값이 얼마나 다양한지를 측정합니다.\n\n값이 클수록 번호 간 간격이 다양해 연속 번호·등차수열 같은 인위적 패턴이 없음을 의미합니다.\n\n역대 당첨 번호의 AC 값은 평균 7~10 구간에 집중되어 있습니다.',
+  },
+  match: {
+    title: '패턴 일치 확률',
+    body: '역대 당첨 번호들과의 통계적 유사도를 종합 산출한 수치입니다.\n\n현재 번호 조합이 역대 당첨 패턴(홀짝 비율, 구간 분포, 합계 등)과 얼마나 비슷한지를 퍼센트로 나타냅니다.\n\n높을수록 역대 당첨 번호와 유사한 통계적 특성을 가진 조합입니다.',
+  },
+  rank: {
+    title: '역대 유사 순위',
+    body: '현재 번호 조합과 통계적으로 가장 유사한 역대 당첨 회차의 순위입니다.\n\n1위에 가까울수록 지금까지의 모든 당첨 번호 중 패턴이 가장 유사하다는 의미입니다.\n\n순위 자체가 당첨 가능성을 보증하지는 않으며, 통계적 유사성의 참고 지표입니다.',
+  },
+  zscore: {
+    title: '정규분포 Z-Score',
+    body: '번호 합계가 통계적 평균(138)에서 얼마나 떨어져 있는지를 표준편차(σ) 단위로 나타냅니다.\n\n• ±1σ 이내 — 역대 당첨 합계의 약 68%가 분포하는 중심 안정권\n• ±2σ 이내 — 역대 당첨 합계의 약 95%가 분포\n• ±3σ 초과 — 극히 드문 극단값\n\n0에 가까울수록 통계적으로 가장 안정적인 합계 범위에 속합니다.',
+  },
+  chi: {
+    title: '분포 균일도 (χ²)',
+    body: '카이제곱 검정을 이용해 6개 번호가 1~45 전체 구간에 얼마나 고르게 퍼져 있는지를 측정합니다.\n\n구간: 1-9 / 10-19 / 20-29 / 30-39 / 40-45\n\n100점에 가까울수록 5개 구간에 균형 있게 분포된 이상적인 조합입니다. 특정 구간에 번호가 몰리면 점수가 낮아집니다.',
+  },
+  zscore_panel: {
+    title: 'Normal Distribution Z-Score',
+    body: '번호 합계의 정규분포상 위치를 시각화합니다.\n\n로또 역대 당첨 번호 합계의 평균은 약 138, 표준편차는 약 24입니다. 현재 조합의 합계가 이 분포에서 어디에 위치하는지를 σ 단위로 표시합니다.\n\n• 중심(0σ)에 가까울수록 역대 당첨 번호와 유사한 합계 범위\n• ±2σ 초과 시 통계적으로 드문 극단적 합계',
+  },
+  chi_panel: {
+    title: 'Chi-Squared Zone Distribution',
+    body: '카이제곱(χ²) 검정은 관측값이 기대값에서 얼마나 벗어나는지를 측정하는 통계 기법입니다.\n\n6개 번호가 5개 구간에 분포할 때의 실제 개수(초록 막대)와 이상적 기대 개수(점선)를 비교합니다.\n\n두 값이 가까울수록 균일도 점수가 높아지며, 어느 한 구간에 몰리지 않은 균형 잡힌 조합임을 의미합니다.',
+  },
+  benford_chart: {
+    title: "Benford's Law Comparison Chart",
+    body: "벤포드의 법칙은 자연계의 수들이 따르는 첫 번째 자리 숫자의 분포 법칙입니다.\n\n이론적 분포:\n• 1 → 30.1%   • 2 → 17.6%   • 3 → 12.5%\n• 4 → 9.7%    • 5 → 7.9%    • 6 → 6.7%\n• 7 → 5.8%    • 8 → 5.1%    • 9 → 4.6%\n\n파란 막대(실제)가 회색 막대(이상)에 가까울수록 벤포드 법칙을 잘 따르는 자연스러운 번호 세트입니다.",
+  },
+  preset: {
+    title: '설정 프리셋 1 · 2',
+    body: '현재 필터 설정값 전체를 슬롯에 저장해두고 언제든 불러올 수 있습니다.\n합계 범위, 패턴 조건, 회귀 분석, 엔진 선택, 고정수/제외수가 모두 포함됩니다.\n\n저장: 빈 슬롯을 탭 → 확인\n저장해제: 길게 누름 → 확인\n\n※ 빈 슬롯은 점선, 설정값이 저장된 슬롯은 실선으로 표시됩니다.',
+  },
+};
+
+const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result, onGenerate, lottoHistory, uid }) => {
+  const [config, setConfig] = useState<ScientificFilterConfig>(() => {
+    try {
+      const raw = localStorage.getItem('scienceLastSettings');
+      if (raw) return { ...INITIAL_CONFIG, ...JSON.parse(raw).config };
+    } catch {}
+    return { ...INITIAL_CONFIG };
+  });
+  const [infoModal, setInfoModal] = useState<string | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Firestore 마운트 동기화: 로컬보다 Firestore가 최신이면 덮어씌움
+  useEffect(() => {
+    if (!uid) return;
+    const docRef = doc(db, 'users', uid, 'scienceSettings', 'data');
+    getDoc(docRef).then(snap => {
+      if (!snap.exists()) return;
+      const remote = snap.data();
+      const localRaw = localStorage.getItem('scienceLastSettings');
+      const localUpdatedAt = localRaw ? (JSON.parse(localRaw).updatedAt ?? 0) : 0;
+      if ((remote.updatedAt ?? 0) > localUpdatedAt) {
+        if (remote.lastSettings) {
+          const d = remote.lastSettings;
+          setConfig({ ...INITIAL_CONFIG, ...(d.config ?? {}) });
+          setUseAdvanced(d.useAdvanced ?? false);
+          setFix1(d.fix1 ?? ''); setFix2(d.fix2 ?? '');
+          setExcl1(d.excl1 ?? ''); setExcl2(d.excl2 ?? '');
+          localStorage.setItem('scienceLastSettings', JSON.stringify({ ...d, updatedAt: remote.updatedAt }));
+        }
+        if (remote.preset1) {
+          localStorage.setItem('sciencePreset1', JSON.stringify(remote.preset1));
+          setHasPreset(prev => ({ ...prev, 1: true }));
+        }
+        if (remote.preset2) {
+          localStorage.setItem('sciencePreset2', JSON.stringify(remote.preset2));
+          setHasPreset(prev => ({ ...prev, 2: true }));
+        }
+      }
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid]);
+
+  // 역대 당첨 번호 앞자리 실제 분포 (벤포드 설명용 — 번대 구분과 다름)
+  // 앞자리 1 = 1, 10~19 / 앞자리 2 = 2, 20~29 / ... / 앞자리 5~9 = 해당 번호 1개씩
+  const leadingDigitStats = useMemo(() => {
+    const counts = new Array(10).fill(0); // index 0 미사용
+    let total = 0;
+    lottoHistory.forEach((round: LottoRound) => {
+      round.numbers.forEach((n: number) => {
+        counts[parseInt(n.toString()[0])]++;
+        total++;
+      });
+    });
+    return { counts, total, rounds: lottoHistory.length };
+  }, [lottoHistory]);
+
+  const benfordInfoBody = useMemo(() => {
+    if (leadingDigitStats.total === 0) return INFO_CONTENT.benford.body;
+    const pct = (n: number) => (n / leadingDigitStats.total * 100).toFixed(1);
+    const c = leadingDigitStats.counts;
+    return `벤포드의 법칙은 자연 발생 수에서 첫 자리 숫자가 1일 확률이 가장 높고(30.1%), 9일 확률이 가장 낮다(4.6%)는 통계 법칙입니다.\n\n⚠️ 로또는 1~45 균등 구조의 인위적 데이터로, 벤포드 법칙이 본질적으로 적용되지 않습니다. 이 지표의 활성화는 권장하지 않습니다.\n\n역대 당첨 번호(${leadingDigitStats.rounds}회차) 앞자리 실제 출현 비율:\n• 앞자리 1 (번호 1, 10~19) — ${pct(c[1])}%\n• 앞자리 2 (번호 2, 20~29) — ${pct(c[2])}%\n• 앞자리 3 (번호 3, 30~39) — ${pct(c[3])}%\n• 앞자리 4 (번호 4, 40~45) — ${pct(c[4])}%\n• 앞자리 5~9 (각 번호 1개) — 각 약 ${pct(c[5])}%\n\n앞자리 1·2·3은 11개 번호, 4는 7개, 5~9는 각 1개를 커버하므로 벤포드 이론값(1→30.1%)과 크게 다릅니다.`;
+  }, [leadingDigitStats]);
 
   const [activeSection, setActiveSection] = useState<'sum' | 'pattern' | 'regression' | 'algo'>('sum');
   const [showDocs, setShowDocs] = useState(false);
@@ -46,12 +152,40 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
   const [tempWheelPool, setTempWheelPool] = useState<number[]>([]);
   const [scanIndex, setScanIndex] = useState(0);
 
-  // 고정수/제외수 UI 상태
-  const [useAdvanced, setUseAdvanced] = useState(false);
-  const [fix1, setFix1] = useState('');
-  const [fix2, setFix2] = useState('');
-  const [excl1, setExcl1] = useState('');
-  const [excl2, setExcl2] = useState('');
+  // 고정수/제외수 UI 상태 (마지막 설정값 복원)
+  const _last = (() => { try { const r = localStorage.getItem('scienceLastSettings'); return r ? JSON.parse(r) : null; } catch { return null; } })();
+  const [useAdvanced, setUseAdvanced] = useState<boolean>(_last?.useAdvanced ?? false);
+  const [fix1, setFix1] = useState<string>(_last?.fix1 ?? '');
+  const [fix2, setFix2] = useState<string>(_last?.fix2 ?? '');
+  const [excl1, setExcl1] = useState<string>(_last?.excl1 ?? '');
+  const [excl2, setExcl2] = useState<string>(_last?.excl2 ?? '');
+
+  // 프리셋 상태
+  const [confirmSavePreset, setConfirmSavePreset] = useState<1 | 2 | null>(null);
+  const [confirmClearPreset, setConfirmClearPreset] = useState<1 | 2 | null>(null);
+  const [activePreset, setActivePreset] = useState<1 | 2 | null>(() => {
+    try {
+      const lastRaw = localStorage.getItem('scienceLastSettings');
+      if (!lastRaw) return null;
+      const last = JSON.parse(lastRaw);
+      for (const slot of [1, 2] as const) {
+        const pRaw = localStorage.getItem(`sciencePreset${slot}`);
+        if (!pRaw) continue;
+        const p = JSON.parse(pRaw);
+        const configMatch = JSON.stringify({ ...INITIAL_CONFIG, ...p.config }) === JSON.stringify({ ...INITIAL_CONFIG, ...last.config });
+        const advMatch = (last.useAdvanced ?? false) === (p.useAdvanced ?? false);
+        const fixMatch = (last.fix1 ?? '') === (p.fix1 ?? '') && (last.fix2 ?? '') === (p.fix2 ?? '');
+        const exclMatch = (last.excl1 ?? '') === (p.excl1 ?? '') && (last.excl2 ?? '') === (p.excl2 ?? '');
+        if (configMatch && advMatch && fixMatch && exclMatch) return slot;
+      }
+    } catch {}
+    return null;
+  });
+  const [hasPreset, setHasPreset] = useState({ 1: !!localStorage.getItem('sciencePreset1'), 2: !!localStorage.getItem('sciencePreset2') });
+  const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggeredRef = useRef(false);
+  const touchStartXRef = useRef(0);
+  const touchStartYRef = useRef(0);
 
   // 역대 당첨율 실시간 계산
   const winningRate = useMemo(() => {
@@ -74,8 +208,99 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
     return () => clearInterval(interval);
   }, [loading]);
 
+  // 마지막 설정값 자동 저장 (로컬 즉시 + Firestore 디바운스 3초)
+  useEffect(() => {
+    const updatedAt = Date.now();
+    const payload = { config, useAdvanced, fix1, fix2, excl1, excl2, updatedAt };
+    try { localStorage.setItem('scienceLastSettings', JSON.stringify(payload)); } catch {}
+    if (!uid) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      const docRef = doc(db, 'users', uid, 'scienceSettings', 'data');
+      setDoc(docRef, { lastSettings: payload, updatedAt }, { merge: true }).catch(() => {});
+    }, 3000);
+  }, [config, useAdvanced, fix1, fix2, excl1, excl2, uid]);
+
+  // 현재 설정이 활성 프리셋과 달라지면 자동 해제
+  useEffect(() => {
+    if (activePreset === null) return;
+    try {
+      const raw = localStorage.getItem(`sciencePreset${activePreset}`);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      const configMatch = JSON.stringify(config) === JSON.stringify({ ...INITIAL_CONFIG, ...saved.config });
+      const advMatch = useAdvanced === (saved.useAdvanced ?? false);
+      const fixMatch = fix1 === (saved.fix1 ?? '') && fix2 === (saved.fix2 ?? '');
+      const exclMatch = excl1 === (saved.excl1 ?? '') && excl2 === (saved.excl2 ?? '');
+      if (!configMatch || !advMatch || !fixMatch || !exclMatch) setActivePreset(null);
+    } catch {}
+  }, [config, useAdvanced, fix1, fix2, excl1, excl2, activePreset]);
+
   const updateConfig = (key: keyof ScientificFilterConfig, value: any) => {
     setConfig(prev => ({ ...prev, [key]: value }));
+  };
+
+  // 프리셋 저장
+  const savePreset = (slot: 1 | 2) => {
+    const data = { config, useAdvanced, fix1, fix2, excl1, excl2 };
+    try { localStorage.setItem(`sciencePreset${slot}`, JSON.stringify(data)); } catch {}
+    if (uid) {
+      const docRef = doc(db, 'users', uid, 'scienceSettings', 'data');
+      setDoc(docRef, { [`preset${slot}`]: data }, { merge: true }).catch(() => {});
+    }
+    setHasPreset(prev => ({ ...prev, [slot]: true }));
+    setActivePreset(slot);
+    setConfirmSavePreset(null);
+  };
+
+  // 프리셋 불러오기
+  const loadPreset = (slot: 1 | 2) => {
+    try {
+      const raw = localStorage.getItem(`sciencePreset${slot}`);
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      setConfig({ ...INITIAL_CONFIG, ...d.config });
+      setUseAdvanced(d.useAdvanced ?? false);
+      setFix1(d.fix1 ?? ''); setFix2(d.fix2 ?? '');
+      setExcl1(d.excl1 ?? ''); setExcl2(d.excl2 ?? '');
+      setActivePreset(slot);
+    } catch {}
+  };
+
+  // 프리셋 삭제
+  const clearPreset = (slot: 1 | 2) => {
+    localStorage.removeItem(`sciencePreset${slot}`);
+    if (uid) {
+      const docRef = doc(db, 'users', uid, 'scienceSettings', 'data');
+      setDoc(docRef, { [`preset${slot}`]: deleteField() }, { merge: true }).catch(() => {});
+    }
+    setHasPreset(prev => ({ ...prev, [slot]: false }));
+    if (activePreset === slot) setActivePreset(null);
+    setConfirmClearPreset(null);
+  };
+
+  // 롱프레스 핸들러
+  const handlePointerDown = (slot: 1 | 2, e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    touchStartXRef.current = e.clientX;
+    touchStartYRef.current = e.clientY;
+    longPressTriggeredRef.current = false;
+    if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+    pressTimerRef.current = setTimeout(() => {
+      const stored = localStorage.getItem(`sciencePreset${slot}`);
+      longPressTriggeredRef.current = true;
+      if (stored) setConfirmClearPreset(slot);
+    }, 600);
+  };
+  const handlePointerMove = (e: React.PointerEvent) => {
+    const dx = Math.abs(e.clientX - touchStartXRef.current);
+    const dy = Math.abs(e.clientY - touchStartYRef.current);
+    if (dx > 8 || dy > 8) {
+      if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+    }
+  };
+  const handlePointerUp = () => {
+    if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
   };
 
   const handleResetAll = () => {
@@ -90,6 +315,7 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
     });
     setUseAdvanced(false);
     setFix1(''); setFix2(''); setExcl1(''); setExcl2('');
+    setActivePreset(null);
   };
 
   const handleResetCurrentTab = () => {
@@ -207,7 +433,7 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                       <h4 className="font-black text-lg uppercase tracking-wider">패턴: 무작위성 검증</h4>
                    </div>
                    <p className="text-sm text-slate-400 leading-relaxed">
-                     벤포드의 법칙과 산술 복잡도(AC)를 통해 조합의 '자연스러움'을 측정합니다. 너무 단순하거나 인위적인 규칙성을 배제하여, 로또 기계가 선호하는 완전한 물리적 무질서 상태에 가장 가까운 조합만을 선별합니다.
+                     산술 복잡도(AC)와 홀짝·고저 비율을 통해 조합의 구조적 균형을 검증합니다. 연속 번호나 등차수열처럼 인위적 규칙성이 강한 조합을 배제하고, 역대 당첨 번호에서 공통적으로 나타나는 복잡한 분산 패턴에 부합하는 조합만을 선별합니다.
                    </p>
                 </div>
 
@@ -320,9 +546,10 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                 <div className="p-8 bg-cyan-500/5 rounded-[2rem] border border-cyan-500/20 space-y-4">
                   <h4 className="text-cyan-400 font-black text-lg">1. 벤포드 법칙 엔진 (Benford's Law)</h4>
                   <div className="text-slate-300 text-sm leading-relaxed space-y-3">
-                    <p><strong className="text-white underline underline-offset-4 decoration-cyan-500">왜 'ON'을 추천하나요?</strong></p>
-                    <p>사람이 번호를 수동으로 고를 때(예: 7, 14, 21...)는 무의식적으로 '균등한 간격'이나 '특정 선호 숫자'를 반영하는 경향이 있습니다. 하지만 로또 기계는 완전한 물리적 무작위 추출을 수행합니다.</p>
-                    <p>벤포드의 법칙은 수치 데이터의 첫째 자리가 로그 확률(1은 30%, 9는 4% 등)을 따르는지 검사합니다. 이 엔진을 켜면, <strong className="text-cyan-400">인위적인 패턴이 배제된 '가장 자연스러운 무작위성'을 가진 번호들만 필터링</strong>되어 추출됩니다.</p>
+                    <p><strong className="text-rose-400 underline underline-offset-4 decoration-rose-500">⚠️ 이 옵션은 권장하지 않습니다</strong></p>
+                    <p>벤포드의 법칙은 자연 발생 수치(인구, 주가, 강 길이 등)의 첫째 자리가 로그 확률(1→30.1%, 9→4.6%)을 따르는 통계 법칙입니다. 회계 부정 탐지 등에 쓰입니다.</p>
+                    <p>그러나 로또는 <strong className="text-white">1~45 사이에서 균등하게 추출되는 인위적 데이터</strong>로, 벤포드 법칙이 본질적으로 적용되지 않습니다. 실제 역대 당첨 번호의 앞자리 분포도 이론값(1→30%)과 크게 다르며, 이는 1~45 구조에서 오는 자연스러운 결과입니다.</p>
+                    <p>이 엔진을 ON으로 설정하면 <strong className="text-rose-400">로또에 맞지 않는 기준으로 번호를 필터링</strong>하게 되어 오히려 추출 품질이 저하될 수 있습니다. 참고용 지표로만 활용하세요.</p>
                   </div>
                 </div>
 
@@ -901,25 +1128,60 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
               )}
             </div>
 
-            {/* 고정수 및 제외수 선택 (탭 무관 고정) */}
-            <div className={`pt-6 border-t border-white/10 space-y-4 transition-opacity ${(config.algorithmMode === 'Wheeling' || config.algorithmMode === 'BradfordLegacy') ? 'opacity-30 pointer-events-none' : ''}`}>
-              <div className="flex items-center space-x-3 px-1">
-                <input
-                  type="checkbox"
-                  id="advanced-mode"
-                  checked={useAdvanced}
-                  onChange={e => setUseAdvanced(e.target.checked)}
-                  disabled={config.algorithmMode === 'Wheeling' || config.algorithmMode === 'BradfordLegacy'}
-                  className="w-4 h-4 rounded border-slate-700 bg-slate-900 accent-cyan-500 cursor-pointer disabled:cursor-not-allowed"
-                />
-                <label htmlFor="advanced-mode" className="text-xs font-black text-cyan-400 uppercase tracking-widest cursor-pointer select-none">고정수 or 제외수 선택</label>
-                {(config.algorithmMode === 'Wheeling' || config.algorithmMode === 'BradfordLegacy') && (
-                  <span className="text-[9px] text-slate-600 font-black uppercase tracking-widest">— 현재 모드에서 미적용</span>
-                )}
+            {/* 고정수 및 제외수 선택 + 프리셋 버튼 */}
+            <div className="pt-6 border-t border-white/10 space-y-4">
+              <div className="flex items-center justify-between px-1">
+                {/* 고정수/제외수 토글 — 엔진 모드에 따라 비활성 */}
+                <div className={`flex items-center space-x-3 transition-opacity ${(config.algorithmMode === 'Wheeling' || config.algorithmMode === 'BradfordLegacy') ? 'opacity-30 pointer-events-none' : ''}`}>
+                  <input
+                    type="checkbox"
+                    id="advanced-mode"
+                    checked={useAdvanced}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUseAdvanced(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 accent-cyan-500 cursor-pointer"
+                  />
+                  <label htmlFor="advanced-mode" className="text-xs font-black text-cyan-400 uppercase tracking-widest cursor-pointer select-none">고정수 or 제외수 선택</label>
+                  {(config.algorithmMode === 'Wheeling' || config.algorithmMode === 'BradfordLegacy') && (
+                    <span className="text-[9px] text-slate-600 font-black uppercase tracking-widest">— 현재 모드에서 미적용</span>
+                  )}
+                </div>
+                {/* 프리셋 버튼 — 엔진 모드와 완전히 독립 */}
+                <div className="relative flex items-center space-x-3 mr-8">
+                  {([1, 2] as const).map(slot => (
+                    <button
+                      key={slot}
+                      onClick={() => {
+                        if (longPressTriggeredRef.current) return;
+                        hasPreset[slot] ? loadPreset(slot) : setConfirmSavePreset(slot);
+                      }}
+                      onContextMenu={e => { e.preventDefault(); if (!longPressTriggeredRef.current) setConfirmSavePreset(slot); }}
+                      onPointerDown={e => handlePointerDown(slot, e)}
+                      onPointerMove={handlePointerMove}
+                      onPointerUp={handlePointerUp}
+                      onPointerLeave={handlePointerUp}
+                      onPointerCancel={handlePointerUp}
+                      title={hasPreset[slot] ? `${slot}번 불러오기 / 길게 누르면 삭제` : `${slot}번 슬롯에 저장`}
+                      className={`w-10 h-10 rounded-xl text-sm font-black transition-all flex items-center justify-center
+                        ${activePreset === slot
+                          ? 'border border-cyan-400 bg-cyan-500 text-slate-950 shadow-[0_0_8px_rgba(6,182,212,0.6)]'
+                          : hasPreset[slot]
+                            ? 'border border-slate-500 bg-white/5 text-slate-400 hover:border-slate-300 hover:text-slate-200'
+                            : 'border border-dashed border-slate-500 bg-white/5 text-slate-400 hover:border-slate-300 hover:text-slate-200'}`}
+                    >
+                      {slot}
+                    </button>
+                  ))}
+                  {/* ? 안내 버튼 — 2번 버튼 우상단 */}
+                  <button
+                    onClick={() => setInfoModal('preset')}
+                    className="absolute -top-1.5 -right-6 w-3.5 h-3.5 rounded-full bg-slate-900 border border-slate-600 flex items-center justify-center text-[7px] font-black text-slate-400 hover:text-white hover:border-slate-400 transition-all"
+                  >?</button>
+                </div>
               </div>
 
+              {/* 고정수/제외수 입력 — 엔진 모드에 따라 비활성 */}
               {useAdvanced && (
-                <div className="grid grid-cols-2 gap-4 animate-in slide-in-from-top-4 duration-300">
+                <div className={`grid grid-cols-2 gap-4 animate-in slide-in-from-top-4 duration-300 transition-opacity ${(config.algorithmMode === 'Wheeling' || config.algorithmMode === 'BradfordLegacy') ? 'opacity-30 pointer-events-none' : ''}`}>
                   <div className="space-y-2">
                     <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">고정수 (Include Max 2)</label>
                     <div className="flex space-x-2">
@@ -973,9 +1235,19 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
             <div className="space-y-10 animate-in zoom-in-95 duration-1000">
               {/* 메인 세트 */}
               <div className="space-y-2">
-                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">
-                  {result.additionalSets ? `Game #1 (대표 번호)` : '추출 번호'}
-                </p>
+                <div className="flex items-center justify-between px-1">
+                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                    {result.additionalSets ? `Game #1 (대표 번호)` : '추출 번호'}
+                  </p>
+                  {result.savedAt && (
+                    <p className="text-[9px] font-bold text-slate-600">
+                      추출시간: {(() => {
+                        const d = new Date(result.savedAt);
+                        return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}. ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                      })()}
+                    </p>
+                  )}
+                </div>
                 <div className="glass p-8 rounded-[3rem] border border-cyan-500/10 shadow-xl flex items-center justify-center gap-4 group hover:border-cyan-500/30 transition-all">
                   {result.numbers.map((num, i) => (
                     <div key={i} className="w-14 h-14 rounded-2xl bg-slate-800 border border-white/5 flex items-center justify-center text-2xl font-black text-white shadow-lg group-hover:scale-105 transition-transform">
@@ -1009,23 +1281,48 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
               )}
 
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {/* 벤포드 적합도 카드 — 항상 표시, 적용 여부 배지 포함 */}
+                <div className="relative glass p-7 rounded-[2rem] border border-white/5 space-y-2 shadow-xl">
+                  <button
+                    onClick={() => setInfoModal('benford')}
+                    className="absolute top-3 right-3 w-5 h-5 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[9px] font-black text-slate-500 hover:bg-white/10 hover:text-slate-300 transition-colors"
+                  >?</button>
+                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">벤포드 적합도</p>
+                  {result.benfordApplied ? (
+                    <div className="flex items-baseline gap-2">
+                      <p className="text-2xl font-black text-amber-400">{result.metrics.benfordScore}점</p>
+                      <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-400">적용됨</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <p className="text-2xl font-black text-slate-600">—</p>
+                      <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full bg-slate-700/60 border border-slate-600/30 text-slate-500">적용 안됨</span>
+                    </div>
+                  )}
+                </div>
+
                 {[
-                  { label: "벤포드 적합도", val: `${result.metrics.benfordScore}점`, color: "text-amber-400" },
-                  { label: "산술 복잡도", val: `AC ${result.metrics.acValue}`, color: "text-cyan-400" },
-                  { label: "패턴 일치 확률", val: `${result.matchProbability.toFixed(1)}%`, color: "text-emerald-400" },
-                  { label: "역대 유사 순위", val: `${result.historicalRank}위`, color: "text-slate-400" },
+                  { label: "산술 복잡도", val: `AC ${result.metrics.acValue}`, color: "text-cyan-400", key: "ac" },
+                  { label: "패턴 일치 확률", val: `${result.matchProbability.toFixed(1)}%`, color: "text-emerald-400", key: "match" },
+                  { label: "역대 유사 순위", val: `${result.historicalRank}위`, color: "text-slate-400", key: "rank" },
                   {
                     label: "정규분포 Z-Score",
                     val: `${result.metrics.sumZScore > 0 ? '+' : ''}${result.metrics.sumZScore}σ`,
-                    color: Math.abs(result.metrics.sumZScore) <= 1 ? "text-indigo-400" : Math.abs(result.metrics.sumZScore) <= 2 ? "text-yellow-400" : "text-rose-400"
+                    color: Math.abs(result.metrics.sumZScore) <= 1 ? "text-indigo-400" : Math.abs(result.metrics.sumZScore) <= 2 ? "text-yellow-400" : "text-rose-400",
+                    key: "zscore"
                   },
                   {
                     label: "분포 균일도",
                     val: `${result.metrics.chiSquaredScore}점`,
-                    color: result.metrics.chiSquaredScore >= 75 ? "text-emerald-400" : result.metrics.chiSquaredScore >= 50 ? "text-yellow-400" : "text-rose-400"
+                    color: result.metrics.chiSquaredScore >= 75 ? "text-emerald-400" : result.metrics.chiSquaredScore >= 50 ? "text-yellow-400" : "text-rose-400",
+                    key: "chi"
                   },
                 ].map((stat, i) => (
-                  <div key={i} className="glass p-7 rounded-[2rem] border border-white/5 space-y-2 shadow-xl">
+                  <div key={i} className="relative glass p-7 rounded-[2rem] border border-white/5 space-y-2 shadow-xl">
+                    <button
+                      onClick={() => setInfoModal(stat.key)}
+                      className="absolute top-3 right-3 w-5 h-5 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[9px] font-black text-slate-500 hover:bg-white/10 hover:text-slate-300 transition-colors"
+                    >?</button>
                     <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{stat.label}</p>
                     <p className={`text-2xl font-black ${stat.color}`}>{stat.val}</p>
                   </div>
@@ -1034,12 +1331,18 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
 
               {/* Z-Score 시각 패널 */}
               <div className="glass p-8 rounded-[2.5rem] border border-indigo-500/20 shadow-xl space-y-5">
-                <div className="flex items-center space-x-4 mb-2">
-                  <div className="w-10 h-10 bg-indigo-500/20 rounded-xl flex items-center justify-center text-indigo-400 font-black text-sm">σ</div>
-                  <div>
-                    <h3 className="text-xs font-black text-indigo-300 uppercase tracking-widest">Normal Distribution Z-Score</h3>
-                    <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">합계의 통계적 위치 — 평균 138, 표준편차 24</p>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-10 h-10 bg-indigo-500/20 rounded-xl flex items-center justify-center text-indigo-400 font-black text-sm">σ</div>
+                    <div>
+                      <h3 className="text-xs font-black text-indigo-300 uppercase tracking-widest">Normal Distribution Z-Score</h3>
+                      <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">합계의 통계적 위치 — 평균 138, 표준편차 24</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => setInfoModal('zscore_panel')}
+                    className="w-6 h-6 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-black text-slate-500 hover:bg-white/10 hover:text-slate-300 transition-colors flex-shrink-0"
+                  >?</button>
                 </div>
                 {/* 수직 눈금 바 */}
                 <div className="relative h-8 mx-4">
@@ -1072,12 +1375,18 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
 
               {/* 카이제곱 분포 균일도 패널 */}
               <div className="glass p-8 rounded-[2.5rem] border border-emerald-500/20 shadow-xl space-y-5">
-                <div className="flex items-center space-x-4 mb-2">
-                  <div className="w-10 h-10 bg-emerald-500/20 rounded-xl flex items-center justify-center text-emerald-400 font-black text-sm">χ²</div>
-                  <div>
-                    <h3 className="text-xs font-black text-emerald-300 uppercase tracking-widest">Chi-Squared Zone Distribution</h3>
-                    <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">5개 구간 번호 분포 균일도 — 높을수록 고르게 퍼짐</p>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-10 h-10 bg-emerald-500/20 rounded-xl flex items-center justify-center text-emerald-400 font-black text-sm">χ²</div>
+                    <div>
+                      <h3 className="text-xs font-black text-emerald-300 uppercase tracking-widest">Chi-Squared Zone Distribution</h3>
+                      <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">5개 구간 번호 분포 균일도 — 높을수록 고르게 퍼짐</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => setInfoModal('chi_panel')}
+                    className="w-6 h-6 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-black text-slate-500 hover:bg-white/10 hover:text-slate-300 transition-colors flex-shrink-0"
+                  >?</button>
                 </div>
                 {/* 구간별 실제 분포 바차트 */}
                 <div className="flex gap-2 items-end h-16">
@@ -1134,15 +1443,21 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                 </div>
               </div>
 
-              <div className="glass p-10 rounded-[4rem] border border-cyan-500/20 shadow-2xl space-y-6">
+              {config.applyBenfordLaw && (<div className="glass p-10 rounded-[4rem] border border-cyan-500/20 shadow-2xl space-y-6">
                  <div className="flex justify-between items-center">
                     <div>
                        <h3 className="text-xs font-black text-white uppercase tracking-widest">Benford's Law Comparison Chart</h3>
                        <p className="text-[10px] text-slate-500 font-bold uppercase mt-1">이론적 분포(로그 곡선) vs 추출 조합 분포</p>
                     </div>
-                    <div className="flex space-x-4">
-                       <div className="flex items-center space-x-2"><div className="w-2 h-2 bg-cyan-500 rounded-full"></div><span className="text-[8px] font-bold text-slate-400 uppercase">Actual</span></div>
-                       <div className="flex items-center space-x-2"><div className="w-2 h-2 bg-white/10 rounded-full"></div><span className="text-[8px] font-bold text-slate-400 uppercase">Ideal</span></div>
+                    <div className="flex items-center space-x-3">
+                       <div className="flex space-x-4">
+                         <div className="flex items-center space-x-2"><div className="w-2 h-2 bg-cyan-500 rounded-full"></div><span className="text-[8px] font-bold text-slate-400 uppercase">Actual</span></div>
+                         <div className="flex items-center space-x-2"><div className="w-2 h-2 bg-white/10 rounded-full"></div><span className="text-[8px] font-bold text-slate-400 uppercase">Ideal</span></div>
+                       </div>
+                       <button
+                         onClick={() => setInfoModal('benford_chart')}
+                         className="w-6 h-6 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-black text-slate-500 hover:bg-white/10 hover:text-slate-300 transition-colors flex-shrink-0"
+                       >?</button>
                     </div>
                  </div>
                  <div className="flex justify-between items-end h-32 px-4 gap-2">
@@ -1161,15 +1476,19 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                     <p className="text-[11px] text-cyan-400 font-bold leading-relaxed text-center italic">
                        "추출된 조합의 통계적 정합성이 벤포드 로그 곡선과 {result.metrics.benfordScore}% 일치합니다."
                     </p>
-                    <div className="p-5 bg-slate-900/50 rounded-2xl border border-white/5 space-y-3">
-                      <p className="text-[12px] text-slate-100 font-black text-center uppercase tracking-widest">💡 벤포드 적합도 점수의 의미</p>
-                      <p className="text-[11px] text-slate-400 leading-relaxed text-center italic px-2">
-                         이 점수는 번호가 인위적인 패턴을 벗어나 **'자연 상태의 무작위 분포'**를 얼마나 잘 따르는지 나타내는 척도입니다. <br/>
-                         로또는 기계적 무작위 추출이므로, **점수가 100%에 가까울수록 조작된 느낌이 없는 '가장 자연스럽고 강력한 무작위성'을 가진 번호 세트**임을 뜻합니다.
+                    <div className="p-5 bg-slate-900/50 rounded-2xl border border-amber-500/10 space-y-3">
+                      <p className="text-[12px] text-amber-400/80 font-black text-center uppercase tracking-widest">⚠️ 이 지표에 대하여</p>
+                      <p className="text-[11px] text-slate-400 leading-relaxed text-center px-2">
+                        벤포드의 법칙은 <span className="text-slate-300 font-bold">자연 발생 데이터</span>에 적용되는 통계 법칙입니다.<br/>
+                        로또는 1~45 사이의 <span className="text-slate-300 font-bold">균등 추출</span>이므로 이 법칙이 본질적으로 적용되지 않습니다.
+                      </p>
+                      <p className="text-[10px] text-slate-500 leading-relaxed text-center px-2 border-t border-white/5 pt-3">
+                        실제 역대 앞자리 출현 빈도 (1~1211회 기준)<br/>
+                        앞자리 1 · 2 · 3 → 각 약 24~25% &nbsp;|&nbsp; 앞자리 4 → 약 13% &nbsp;|&nbsp; 앞자리 5~9 → 각 약 2%
                       </p>
                     </div>
                  </div>
-              </div>
+              </div>)}
 
               <div className="glass p-10 rounded-[5rem] border border-cyan-500/20 relative overflow-hidden shadow-2xl">
                 <div className="flex items-center space-x-5 mb-8">
@@ -1216,6 +1535,77 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
         .custom-scroll::-webkit-scrollbar { width: 4px; }
         .custom-scroll::-webkit-scrollbar-thumb { background: rgba(6, 182, 212, 0.3); border-radius: 10px; }
       `}</style>
+
+      {/* 프리셋 저장 확인 모달 */}
+      {confirmSavePreset && (
+        <div className="fixed inset-0 z-[9000] flex items-center justify-center px-6" onClick={() => setConfirmSavePreset(null)}>
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div className="relative glass rounded-[2.5rem] border border-white/10 p-8 max-w-xs w-full shadow-2xl animate-in zoom-in-95 fade-in duration-200 space-y-5" onClick={e => e.stopPropagation()}>
+            <p className="text-sm font-black text-white text-center leading-relaxed">
+              현재 설정값을<br/>
+              <span className="text-cyan-400">{confirmSavePreset}번 슬롯</span>에 저장할까요?
+            </p>
+            <p className="text-[10px] text-slate-500 text-center">필터 설정 · 고정수 · 제외수 포함</p>
+            <div className="flex space-x-3">
+              <button onClick={() => setConfirmSavePreset(null)} className="flex-1 py-3 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black text-slate-400 hover:text-white transition-all uppercase tracking-widest">취소</button>
+              <button onClick={() => savePreset(confirmSavePreset)} className="flex-1 py-3 bg-cyan-600 hover:bg-cyan-500 rounded-2xl text-[10px] font-black text-slate-950 transition-all uppercase tracking-widest">저장</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 프리셋 삭제 확인 모달 */}
+      {confirmClearPreset && (
+        <div className="fixed inset-0 z-[9000] flex items-center justify-center px-6" onClick={() => setConfirmClearPreset(null)}>
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div className="relative glass rounded-[2.5rem] border border-rose-500/20 p-8 max-w-xs w-full shadow-2xl animate-in zoom-in-95 fade-in duration-200 space-y-5" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+            <p className="text-sm font-black text-white text-center leading-relaxed">
+              <span className="text-rose-400">{confirmClearPreset}번 슬롯</span>의<br/>저장된 설정을 삭제할까요?
+            </p>
+            <p className="text-[10px] text-slate-500 text-center">삭제 후 복구할 수 없습니다</p>
+            <div className="flex space-x-3">
+              <button onClick={() => setConfirmClearPreset(null)} className="flex-1 py-3 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black text-slate-400 hover:text-white transition-all uppercase tracking-widest">취소</button>
+              <button onClick={() => clearPreset(confirmClearPreset)} className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 rounded-2xl text-[10px] font-black text-white transition-all uppercase tracking-widest">삭제</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 지표 설명 모달 */}
+      {infoModal && INFO_CONTENT[infoModal] && (
+        <div
+          className="fixed inset-0 z-[8000] flex items-center justify-center px-6"
+          onClick={() => setInfoModal(null)}
+        >
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div
+            className="relative glass rounded-[2.5rem] border border-cyan-500/20 p-8 max-w-sm w-full shadow-2xl animate-in zoom-in-95 fade-in duration-200"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* 닫기 버튼 */}
+            <button
+              onClick={() => setInfoModal(null)}
+              className="absolute top-4 right-4 w-7 h-7 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors text-sm"
+            >✕</button>
+
+            {/* 아이콘 + 제목 */}
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-9 h-9 rounded-xl bg-cyan-500/15 border border-cyan-500/20 flex items-center justify-center text-cyan-400 font-black text-sm flex-shrink-0">?</div>
+              <h3 className="text-sm font-black text-white tracking-wide">{INFO_CONTENT[infoModal].title}</h3>
+            </div>
+
+            {/* 본문 */}
+            <p className="text-[12px] text-slate-300 leading-relaxed whitespace-pre-line">
+              {infoModal === 'benford' ? benfordInfoBody : INFO_CONTENT[infoModal].body}
+            </p>
+
+            <button
+              onClick={() => setInfoModal(null)}
+              className="mt-6 w-full py-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-black hover:bg-cyan-500/20 transition-colors"
+            >확인</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

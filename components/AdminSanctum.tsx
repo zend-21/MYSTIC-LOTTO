@@ -3,6 +3,7 @@ import ModelStatusCard from './admin/ModelStatusCard';
 import SystemStatsCard from './admin/SystemStatsCard';
 import SubAdminManager from './admin/SubAdminManager';
 import ReportInbox from './admin/ReportInbox';
+import UserSearchPanel from './admin/UserSearchPanel';
 
 interface AdminSanctumProps {
   subAdminConfig: Record<string, number>;
@@ -32,6 +33,7 @@ const AdminSanctum: React.FC<AdminSanctumProps> = ({
         onToast={onToast}
       />
       <ReportInbox />
+      <UserSearchPanel onToast={onToast} />
     </section>
   );
 };

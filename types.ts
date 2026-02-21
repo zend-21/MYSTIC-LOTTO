@@ -67,6 +67,8 @@ export interface ScientificFilterConfig {
 
 export interface ScientificAnalysisResult {
   numbers: number[];
+  savedAt?: number;
+  benfordApplied?: boolean;
   metrics: {
     sum: number;
     sum123: number;
@@ -153,6 +155,9 @@ export interface OrbDecoration {
   name: string;
   effectClass: string;
   price: number;
+  overlayAnimation?: string;
+  outerAnimation?: string;
+  color?: string;
 }
 
 export interface AnnualDestiny {
@@ -205,6 +210,7 @@ export interface ChatMessage {
   userLevel: number;
   message: string;
   timestamp: number;
+  excludeUserId?: string; // 이 UID의 사용자에게는 표시하지 않음 (입장 시스템 메시지용)
 }
 
 export interface ChatRoom {
@@ -220,6 +226,7 @@ export interface ChatRoom {
   icon?: string; // 방 대표 이모지 아이콘
   lastEnteredAt?: number; // 마지막 입장 타임스탬프 (3일 미방문 자동 소멸용)
   renameCount?: number; // 행성명/아이콘 변경 횟수 (0 또는 undefined = 무료, 1이상 = 500L)
+  isUnderReview?: boolean; // 신고 검토 중 — 삭제 금지 플래그
 }
 
 export interface BoardComment {
@@ -270,10 +277,16 @@ export interface ModelStatus {
 }
 
 export const ORB_DECORATIONS: OrbDecoration[] = [
-  { id: 'default', name: '기본 오라', effectClass: 'animate-pulse', price: 0 },
-  { id: 'sparkle', name: '황금 별가루', effectClass: 'animate-bounce blur-[1px]', price: 1000 },
-  { id: 'flame', name: '정열의 불꽃', effectClass: 'animate-ping opacity-20', price: 5000 },
-  { id: 'galaxy', name: '은하수의 숨결', effectClass: 'animate-spin duration-[5000ms]', price: 10000 },
+  { id: 'default',  name: '기본 오라',    effectClass: 'animate-pulse', price: 0 },
+  { id: 'crimson',  name: '심홍의 기운',  effectClass: '', price: 0, overlayAnimation: 'orb-crimson 7s ease-in-out infinite',    outerAnimation: 'orb-outer-crimson 3s ease-in-out infinite',   color: 'rgba(220,38,38,0.6)' },
+  { id: 'ocean',    name: '쪽빛의 기운',  effectClass: '', price: 0, overlayAnimation: 'orb-ocean 8s ease-in-out infinite',      outerAnimation: 'orb-outer-ocean 3s ease-in-out infinite',     color: 'rgba(6,182,212,0.6)' },
+  { id: 'violet',   name: '심연의 기운',  effectClass: '', price: 0, overlayAnimation: 'orb-violet 7.5s ease-in-out infinite',   outerAnimation: 'orb-outer-violet 3s ease-in-out infinite',    color: 'rgba(139,92,246,0.6)' },
+  { id: 'emerald',  name: '에메랄드 기운', effectClass: '', price: 0, overlayAnimation: 'orb-emerald 9s ease-in-out infinite',   outerAnimation: 'orb-outer-emerald 3s ease-in-out infinite',   color: 'rgba(16,185,129,0.6)' },
+  { id: 'amber',    name: '황혼의 기운',  effectClass: '', price: 0, overlayAnimation: 'orb-amber 7s ease-in-out infinite',      outerAnimation: 'orb-outer-amber 3s ease-in-out infinite',     color: 'rgba(245,158,11,0.6)' },
+  { id: 'rose',     name: '장미빛 기운',  effectClass: '', price: 0, overlayAnimation: 'orb-rose 8.5s ease-in-out infinite',     outerAnimation: 'orb-outer-rose 3s ease-in-out infinite',      color: 'rgba(244,63,94,0.6)' },
+  { id: 'teal',     name: '청옥의 기운',  effectClass: '', price: 0, overlayAnimation: 'orb-teal 9.5s ease-in-out infinite',     outerAnimation: 'orb-outer-teal 3s ease-in-out infinite',      color: 'rgba(20,184,166,0.6)' },
+  { id: 'obsidian', name: '흑요석 기운',  effectClass: '', price: 0, overlayAnimation: 'orb-obsidian 9s ease-in-out infinite',   outerAnimation: 'orb-outer-obsidian 3s ease-in-out infinite',  color: 'rgba(30,27,75,0.9)' },
+  { id: 'rainbow',  name: '랜덤 기운',   effectClass: '', price: 0, overlayAnimation: 'orb-rainbow 49s ease-in-out infinite',    outerAnimation: 'orb-outer-rainbow 49s ease-in-out infinite',  color: 'conic-gradient(#dc2626, #06b6d4, #8b5cf6, #10b981, #f59e0b, #f43f5e, #14b8a6, #dc2626)' },
 ];
 
 export const GOLDEN_CARD_PRICE = 50000; 

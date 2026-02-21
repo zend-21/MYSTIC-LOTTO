@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getR2UploadUrl = exports.checkModelDeprecation = exports.cleanupExpiredRooms = exports.spendPoints = exports.getFixedDestinyNumbers = exports.getScientificReport = exports.getFortuneAndNumbers = void 0;
+exports.getR2UploadUrl = exports.checkModelDeprecation = exports.cleanupExpiredRooms = exports.performOffering = exports.spendPoints = exports.getFixedDestinyNumbers = exports.getScientificReport = exports.getFortuneAndNumbers = void 0;
 const admin = require("firebase-admin");
 const https_1 = require("firebase-functions/v2/https");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -231,6 +231,15 @@ exports.getScientificReport = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], r
       지표 요약: ${JSON.stringify(metrics)}
       알고리즘: ${engineLabel}
 
+      ⚠️ 출력 형식 원칙 (절대 준수):
+      - #, ##, ###, #### 같은 마크다운 헤더를 절대 사용하지 마세요.
+      - **텍스트** 또는 *텍스트* 같은 마크다운 볼드·이탤릭을 사용하지 마세요.
+      - 섹션 구분이 필요할 때는 ▣ 기호로 시작하세요. 예) ▣ 엔진 분석
+      - 소제목 강조는 ◈ 기호를 사용하세요. 예) ◈ 벤포드 적합도
+      - 특별히 강조할 단어나 수치는 『텍스트』처럼 낫표로 묶으세요.
+      - 불릿 리스트는 • 기호만 사용하세요. - 또는 * 리스트 기호 사용 금지.
+      - 첫 문장은 반드시 "미스틱 로또 연구실의 AI 수석 분석가입니다." 로 시작하세요. (** 없이)
+
       분석 리포트 가이드라인:
       1. 엔진 설명 — ${engineContext}
       2. 벤포드 적합도(${metrics.benfordScore}점)가 주는 통계적 정합성과 산술 복잡도(AC) ${metrics.acValue}의 신뢰성을 전문적으로 설명하세요.
@@ -243,6 +252,15 @@ exports.getScientificReport = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], r
         contents: prompt,
     }));
     let finalReport = response.text || "지성 분석 결과를 도출하지 못했습니다.";
+    // 마크다운 잔재 강제 제거 (AI가 프롬프트를 무시할 경우 서버에서 후처리)
+    finalReport = finalReport
+        .replace(/#{1,6}\s*/g, '') // ###, ##, # 헤더 제거
+        .replace(/\*\*(.+?)\*\*/g, '$1') // **볼드** → 텍스트만
+        .replace(/\*(.+?)\*/g, '$1') // *이탤릭* → 텍스트만
+        .replace(/^- /gm, '• ') // - 불릿 → • 로 교체
+        .replace(/^\* /gm, '• ') // * 불릿 → • 로 교체
+        .replace(/---+/g, '') // --- 구분선 제거
+        .trim();
     if (algorithmMode === "BradfordLegacy" && bradfordSets && bradfordSets.length > 0) {
         const otherSets = bradfordSets
             .slice(1)
@@ -394,6 +412,97 @@ exports.spendPoints = (0, https_1.onCall)({ region: "asia-northeast3" }, async (
         await deductPoints(uid, amount, tx);
     });
     return { success: true };
+});
+// ──────────────────────────────────────────────
+// 봉헌 수행 (확률 계산 서버사이드)
+// ──────────────────────────────────────────────
+exports.performOffering = (0, https_1.onCall)({ region: "asia-northeast3" }, async (request) => {
+    var _a, _b, _c;
+    if (!request.auth)
+        throw new https_1.HttpsError("unauthenticated", "로그인이 필요합니다.");
+    const uid = request.auth.uid;
+    const { amount } = request.data;
+    if (!amount || typeof amount !== "number" || amount <= 0 || !Number.isInteger(amount)) {
+        throw new https_1.HttpsError("invalid-argument", "유효하지 않은 봉헌 금액입니다.");
+    }
+    // 사용자 레벨 조회
+    const userSnap = await db.collection("users").doc(uid).get();
+    if (!userSnap.exists)
+        throw new https_1.HttpsError("not-found", "사용자 데이터를 찾을 수 없습니다.");
+    const level = (_c = (_b = (_a = userSnap.data()) === null || _a === void 0 ? void 0 : _a.orb) === null || _b === void 0 ? void 0 : _b.level) !== null && _c !== void 0 ? _c : 1;
+    // 서버사이드 확률 계산 (crypto.randomBytes로 안전한 난수 생성)
+    const rand = Math.random();
+    let multiplier = 1;
+    if (level >= 100) {
+        // 우주의 크리스탈: 1x:0%, 2x:45%, 5x:35%, 10x:20%
+        if (rand < 0.20)
+            multiplier = 10;
+        else if (rand < 0.55)
+            multiplier = 5;
+        else
+            multiplier = 2;
+    }
+    else if (level >= 80) {
+        // 초월 황금태양: 1x:15%, 2x:40%, 5x:30%, 10x:15%
+        if (rand < 0.15)
+            multiplier = 10;
+        else if (rand < 0.45)
+            multiplier = 5;
+        else if (rand < 0.85)
+            multiplier = 2;
+        else
+            multiplier = 1;
+    }
+    else if (level >= 50) {
+        // 성운의 정수: 1x:30%, 2x:35%, 5x:25%, 10x:10%
+        if (rand < 0.10)
+            multiplier = 10;
+        else if (rand < 0.35)
+            multiplier = 5;
+        else if (rand < 0.70)
+            multiplier = 2;
+        else
+            multiplier = 1;
+    }
+    else if (level >= 10) {
+        // 각성의 구슬: 1x:40%, 2x:33%, 5x:20%, 10x:7%
+        if (rand < 0.07)
+            multiplier = 10;
+        else if (rand < 0.27)
+            multiplier = 5;
+        else if (rand < 0.60)
+            multiplier = 2;
+        else
+            multiplier = 1;
+    }
+    else {
+        // 태동의 씨앗: 1x:50%, 2x:30%, 5x:15%, 10x:5%
+        if (rand < 0.05)
+            multiplier = 10;
+        else if (rand < 0.20)
+            multiplier = 5;
+        else if (rand < 0.50)
+            multiplier = 2;
+        else
+            multiplier = 1;
+    }
+    const totalLumen = amount * multiplier;
+    // 루멘 지급 + 봉헌 로그 기록 (트랜잭션)
+    const userRef = db.collection("users").doc(uid);
+    const logRef = db.collection("offeringLogs").doc();
+    await db.runTransaction(async (tx) => {
+        tx.update(userRef, { "orb.points": admin.firestore.FieldValue.increment(totalLumen) });
+        tx.set(logRef, {
+            uid,
+            amount,
+            level,
+            rand,
+            multiplier,
+            totalLumen,
+            performedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+    });
+    return { multiplier, totalLumen };
 });
 // ──────────────────────────────────────────────
 // 3일 미활동 방 자동 소멸 (매일 자정 KST 실행)

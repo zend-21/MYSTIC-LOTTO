@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { UserProfile, OrbState, ChatRoom, COST_ROOM_CREATE } from '../types';
+import { UserProfile, OrbState, ChatRoom, COST_ROOM_CREATE, ORB_DECORATIONS } from '../types';
 import { OrbVisual } from './FortuneOrb';
 import { spendPoints } from '../services/geminiService';
 import BoardPanel from './square/BoardPanel';
@@ -39,7 +39,7 @@ const ROOM_ICONS = [
 
 // Firebase imports
 import { db, auth, rtdb } from '../services/firebase';
-import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, orderBy, limit, getDocs, getDoc, startAfter, QueryDocumentSnapshot, arrayUnion } from "firebase/firestore";
+import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, orderBy, limit, getDocs, getDoc, startAfter, QueryDocumentSnapshot, arrayUnion, serverTimestamp } from "firebase/firestore";
 import { ref as rtdbRef, set as rtdbSet, remove as rtdbRemove, onDisconnect, onValue, get as rtdbGet } from 'firebase/database';
 
 interface CelestialSquareProps {
@@ -102,6 +102,13 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
   const [showIconPicker, setShowIconPicker] = useState<'create' | string | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // 신고 상태
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState('');
+  const [isReporting, setIsReporting] = useState(false);
+
+  const REPORT_REASONS = ['욕설·비방', '사기·거래 유도', '음란·성적 발언', '명예 훼손', '스팸·도배', '기타'];
+
   const currentDisplayName = orb.nickname || orb.uniqueTag || '익명';
 
   const loadMoreRooms = async () => {
@@ -146,6 +153,7 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
       const allRooms = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ChatRoom));
 
       allRooms.forEach(room => {
+        if (room.isUnderReview) return; // 신고 검토 중 — 삭제 금지
         if (room.deleteAt && room.deleteAt <= now) {
           deleteDoc(doc(db, "square", "rooms", "list", room.id)).catch(() => {});
           return;
@@ -157,9 +165,9 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
       });
 
       const filtered = allRooms.filter(r => {
-        if (r.deleteAt && r.deleteAt <= now) return false;
+        if (!r.isUnderReview && r.deleteAt && r.deleteAt <= now) return false;
         const lastActivity = r.lastEnteredAt ?? r.createdAt;
-        if (!r.deleteAt && (r.participantCount ?? 0) === 0 && lastActivity < now - THREE_DAYS) return false;
+        if (!r.isUnderReview && !r.deleteAt && (r.participantCount ?? 0) === 0 && lastActivity < now - THREE_DAYS) return false;
         return true;
       });
       setRooms(filtered);
@@ -202,6 +210,22 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
     return () => {
       unsubPresence();
       setParticipants([]);
+
+      // 퇴장 시스템 메시지 Firestore 기록 (다른 사용자에게만 보임)
+      const exitName = currentDisplayName;
+      if (activeRoom && exitName) {
+        addDoc(
+          collection(db, 'square', 'rooms', 'list', activeRoom.id, 'messages'),
+          {
+            userId: 'system',
+            userName: 'system',
+            userLevel: 0,
+            message: `${exitName}님이 퇴장하였습니다.`,
+            timestamp: Date.now(),
+          }
+        ).catch(() => {});
+      }
+
       rtdbRemove(presenceRef)
         .then(() => rtdbGet(roomPresenceRef))
         .then((snap) => {
@@ -334,6 +358,11 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
   const handleInstantDeletion = async () => {
     if (!activeRoom || !auth.currentUser) return;
     if (activeRoom.creatorId !== auth.currentUser.uid) return;
+    if (activeRoom.isUnderReview) {
+      onToast("신고 검토 중인 행성은 즉시 소멸할 수 없습니다.");
+      setShowInstantDestroyConfirm(false);
+      return;
+    }
     if (orb.points < 1000) {
       onToast("루멘이 부족합니다. 즉시 소멸에는 1,000루멘이 필요합니다.");
       setShowInstantDestroyConfirm(false);
@@ -357,13 +386,19 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
     if (!auth.currentUser || !activeRoom) return;
     setShowRoomMenu(false);
     const messages = chatPanelRef.current?.getMessages() || [];
+    // participants에 나 자신이 없으면 보완 (RTDB 응답 지연 대비)
+    const myUid = auth.currentUser.uid;
+    let captureParticipants = participants.map(p => ({ uid: p.uid, name: p.name, uniqueTag: p.uniqueTag }));
+    if (!captureParticipants.some(p => p.uid === myUid)) {
+      captureParticipants = [{ uid: myUid, name: currentDisplayName, uniqueTag: orb.uniqueTag || '' }, ...captureParticipants];
+    }
     try {
       await addDoc(collection(db, "users", auth.currentUser.uid, "chatCaptures"), {
         savedAt: Date.now(),
         roomId: activeRoom.id,
         roomName: activeRoom.title,
         creatorName: activeRoom.creatorName,
-        participants: participants.map(p => ({ uid: p.uid, name: p.name, uniqueTag: p.uniqueTag })),
+        participants: captureParticipants,
         messages: messages.map(m => ({
           userId: m.userId,
           userName: m.userName,
@@ -374,6 +409,52 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
       onToast("대화내용이 갈무리되었습니다.");
     } catch {
       onToast("갈무리 저장에 실패했습니다.");
+    }
+  };
+
+  // 대화내용 신고
+  const handleReport = async () => {
+    if (!auth.currentUser || !activeRoom || !reportReason) return;
+    setIsReporting(true);
+    const messages = chatPanelRef.current?.getMessages() || [];
+    const myUid = auth.currentUser.uid;
+    let captureParticipants = participants.map(p => ({ uid: p.uid, name: p.name, uniqueTag: p.uniqueTag }));
+    if (!captureParticipants.some(p => p.uid === myUid)) {
+      captureParticipants = [{ uid: myUid, name: currentDisplayName, uniqueTag: orb.uniqueTag || '' }, ...captureParticipants];
+    }
+    const captureData = {
+      roomId: activeRoom.id,
+      roomName: activeRoom.title,
+      creatorName: activeRoom.creatorName,
+      participants: captureParticipants,
+      messages: messages.map(m => ({ userId: m.userId, userName: m.userName, message: m.message, timestamp: m.timestamp })),
+    };
+    try {
+      await addDoc(collection(db, 'reports'), {
+        ...captureData,
+        reportedAt: serverTimestamp(),
+        reporterUid: myUid,
+        reporterName: currentDisplayName,
+        reporterTag: orb.uniqueTag || '',
+        reason: reportReason,
+        status: 'pending',
+        isReadByAdmin: false,
+      });
+      await addDoc(collection(db, 'users', myUid, 'chatCaptures'), {
+        ...captureData,
+        savedAt: Date.now(),
+        isReport: true,
+        reportReason,
+      });
+      // 방 문서에 삭제 방지 플래그 설정 (소멸 로직이 건너뜀)
+      await updateDoc(doc(db, 'square', 'rooms', 'list', activeRoom.id), { isUnderReview: true });
+      setShowReportModal(false);
+      setReportReason('');
+      onToast('신고가 접수되었습니다. 검토 후 조치하겠습니다.');
+    } catch {
+      onToast('신고 접수에 실패했습니다.');
+    } finally {
+      setIsReporting(false);
     }
   };
 
@@ -531,6 +612,7 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
                        <button onClick={() => { onToast("알림 설정이 변경되었습니다."); setShowRoomMenu(false); }} className="w-full text-left p-3 rounded-xl hover:bg-white/5 text-[10px] font-bold text-slate-300 transition-colors flex items-center space-x-2"><span>🛎️</span><span>알림 끄기</span></button>
                        <button onClick={() => { setShowParticipantsModal(true); setShowRoomMenu(false); }} className="w-full text-left p-3 rounded-xl hover:bg-white/5 text-[10px] font-bold text-slate-300 transition-colors flex items-center space-x-2"><span>👥</span><span>참여자 목록</span></button>
                        <button onClick={handleSaveCapture} className="w-full text-left p-3 rounded-xl hover:bg-white/5 text-[10px] font-bold text-slate-300 transition-colors flex items-center space-x-2"><span>🗂️</span><span>대화내용 저장</span></button>
+                       <button onClick={() => { setShowRoomMenu(false); setShowReportModal(true); }} className="w-full text-left p-3 rounded-xl hover:bg-rose-900/30 text-[10px] font-bold text-rose-400/80 hover:text-rose-300 transition-colors flex items-center space-x-2"><span>🚨</span><span>대화내용 신고하기</span></button>
                        {activeRoom && auth.currentUser && activeRoom.creatorId === auth.currentUser.uid && (
                          <button onClick={() => { setEditRoomTitle(activeRoom.title); setEditRoomIcon(activeRoom.icon || '🪐'); setShowEditRoomModal(true); setShowRoomMenu(false); }} className="w-full text-left p-3 rounded-xl hover:bg-white/5 text-[10px] font-bold text-slate-300 transition-colors flex items-center space-x-2">
                            <span>✏️</span>
@@ -557,7 +639,7 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
                 )}
              </div>
            )}
-           <OrbVisual level={orb.level} className="w-10 h-10 border border-white/10" />
+           <OrbVisual level={orb.level} className="w-10 h-10 border border-white/10" overlayAnimation={(ORB_DECORATIONS.find(d => d.id === orb.activeDecorationId) || ORB_DECORATIONS[0]).overlayAnimation} />
         </div>
       </header>
 
@@ -764,6 +846,41 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
                  <button onClick={() => setShowInstantDestroyConfirm(false)} className="w-full py-4 bg-white/5 text-slate-500 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-white/10">보존하기</button>
               </div>
            </div>
+        </div>
+      )}
+
+      {/* 신고 모달 */}
+      {showReportModal && (
+        <div className="fixed inset-0 z-[7000] flex items-center justify-center px-6">
+          <div className="absolute inset-0 bg-black/90 backdrop-blur-xl" onClick={() => { setShowReportModal(false); setReportReason(''); }}></div>
+          <div className="relative glass p-10 rounded-[3rem] border border-rose-500/30 w-full max-w-sm animate-in zoom-in-95 duration-300">
+            <h3 className="text-xl font-black text-white mb-1 tracking-widest text-center">🚨 대화내용 신고</h3>
+            <p className="text-[10px] text-slate-500 font-bold text-center mb-6">신고 사유를 선택해주세요</p>
+            <div className="grid grid-cols-2 gap-2 mb-6">
+              {REPORT_REASONS.map(reason => (
+                <button
+                  key={reason}
+                  onClick={() => setReportReason(reason)}
+                  className={`py-3 rounded-2xl text-[10px] font-black tracking-widest transition-all border ${
+                    reportReason === reason
+                      ? 'bg-rose-500/30 border-rose-400/60 text-rose-300'
+                      : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10'
+                  }`}
+                >{reason}</button>
+              ))}
+            </div>
+            <div className="space-y-2">
+              <button
+                onClick={handleReport}
+                disabled={!reportReason || isReporting}
+                className="w-full py-4 bg-rose-600 text-white font-black rounded-2xl text-sm uppercase tracking-widest hover:bg-rose-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              >{isReporting ? '신고 중...' : '신고하기'}</button>
+              <button
+                onClick={() => { setShowReportModal(false); setReportReason(''); }}
+                className="w-full py-3 bg-white/5 text-slate-500 font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-white/10"
+              >취소</button>
+            </div>
+          </div>
         </div>
       )}
 

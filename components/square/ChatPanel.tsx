@@ -120,7 +120,26 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
   const idleTimerRef           = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const currentDisplayName = orb.nickname || orb.uniqueTag || '익명';
-  const allMessages = realtimeMsgs.filter(m => m.timestamp >= sessionStartRef.current);
+
+  // 나에게만 보이는 로컬 입장 메시지 (Firestore 미기록)
+  const [localEntryMsg, setLocalEntryMsg] = useState<ChatMessage | null>(null);
+
+  // 날짜·시간 포맷 헬퍼
+  const formatDateTime = (ts: number) => {
+    const d = new Date(ts);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}.${pad(d.getMonth()+1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const myUid = auth.currentUser?.uid;
+  const sessionMsgs = realtimeMsgs
+    .filter(m => m.timestamp >= sessionStartRef.current)
+    .filter(m => !(m.excludeUserId && m.excludeUserId === myUid));
+
+  const allMessages: ChatMessage[] = [
+    ...(localEntryMsg ? [localEntryMsg] : []),
+    ...sessionMsgs,
+  ].sort((a, b) => a.timestamp - b.timestamp);
 
   useImperativeHandle(ref, () => ({ getMessages: () => allMessages }));
 
@@ -170,12 +189,41 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
   // ── 방 변경: 초기화 + 메시지 구독 + i_enter 트리거 ──────────────────────
   useEffect(() => {
-    sessionStartRef.current = Date.now();
+    const entryTs = Date.now();
+    sessionStartRef.current = entryTs;
     setHistoricalMsgs([]);
     setMsgCursor(null);
     setShowEmojiPicker(false);
     isInitialPartRef.current = true;
     prevParticipantsRef.current = [];
+
+    // ① 나에게만 보이는 로컬 입장 메시지 (Firestore 미기록)
+    const roomLabel = `${activeRoom.icon ? activeRoom.icon + ' ' : ''}${activeRoom.title}`;
+    const titleSuffix = activeRoom.title.endsWith('방') ? '' : '방';
+    setLocalEntryMsg({
+      id: '__local_entry__',
+      userId: 'local_entry',
+      userName: 'system',
+      userLevel: 0,
+      message: `${roomLabel}${titleSuffix}에 입장하였습니다.`,
+      timestamp: entryTs,
+    });
+
+    // ② 다른 사용자에게 보이는 Firestore 시스템 입장 메시지
+    if (auth.currentUser) {
+      const displayName = currentDisplayNameRef.current || '익명';
+      addDoc(
+        collection(db, 'square', 'rooms', 'list', activeRoom.id, 'messages'),
+        {
+          userId: 'system',
+          userName: 'system',
+          userLevel: 0,
+          message: `${displayName}님이 입장하였습니다.`,
+          timestamp: entryTs + 1, // localEntryMsg보다 1ms 뒤
+          excludeUserId: auth.currentUser.uid, // 입장한 본인에게는 표시 안 함
+        }
+      ).catch(() => {});
+    }
 
     // i_enter 자동 매크로 (1.5초 후 — 메시지 구독 안정 후)
     const enterTimer = setTimeout(() => sendAutoMacro('i_enter'), 1500);
@@ -420,6 +468,22 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
         {/* 메시지 목록 */}
         <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-8 space-y-6 custom-scroll">
+          {/* 입장 메시지 (공지 위) */}
+          {localEntryMsg && (
+            <div className="flex flex-col items-center space-y-1">
+              <p className="text-[9px] text-slate-600 font-bold tracking-widest">
+                {formatDateTime(localEntryMsg.timestamp)}
+              </p>
+              <div className="flex items-center w-full gap-2">
+                <div className="flex-1 h-px bg-amber-500/20" />
+                <p className="text-[10px] font-black text-amber-400/80 tracking-widest whitespace-nowrap">
+                  {localEntryMsg.message}
+                </p>
+                <div className="flex-1 h-px bg-amber-500/20" />
+              </div>
+            </div>
+          )}
+
           {/* 공지 메시지 */}
           <div className="flex items-start space-x-4 pt-2 pb-4">
             <div className="w-10 h-10 rounded-full bg-indigo-600/30 border border-indigo-500/30 flex items-center justify-center shrink-0">
@@ -440,8 +504,14 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
           {/* 메시지 렌더링 */}
           {allMessages.map(msg => {
-            const isMe     = auth.currentUser && msg.userId === auth.currentUser.uid;
-            const isSystem = msg.userId === 'system';
+            const isMe        = auth.currentUser && msg.userId === auth.currentUser.uid;
+            const isSystem    = msg.userId === 'system';
+            const isLocalEntry = msg.userId === 'local_entry';
+
+            // 공지 위에서 이미 렌더링 — 루프에서는 건너뜀 (getMessages()에는 포함됨)
+            if (isLocalEntry) return null;
+
+            // 시스템 메시지 (입퇴장 공지 등)
             if (isSystem) return (
               <div key={msg.id} className="flex justify-center">
                 <p className="text-[9px] font-black text-indigo-400/60 uppercase tracking-widest px-4 py-1.5 bg-indigo-500/5 rounded-full border border-indigo-500/10">

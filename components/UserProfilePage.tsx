@@ -1,17 +1,35 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { UserProfile, OrbState, SavedFortune, FortuneResult, AnnualDestiny, ScientificAnalysisResult, ORB_DECORATIONS, CalendarType } from '../types';
+import { LegalModal, TermsContent, PrivacyContent } from './LegalDocs';
 import KoreanLunarCalendar from 'korean-lunar-calendar';
 import { OrbVisual } from './FortuneOrb';
 import ModelStatusCard from './admin/ModelStatusCard';
 import AdminSanctum from './AdminSanctum';
 import { db, auth } from '../services/firebase';
-import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, limit, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 
 interface ChatCapture {
   id: string;
   savedAt: number;
+  roomId?: string;
   roomName: string;
   creatorName: string;
+  participants: { uid: string; name: string; uniqueTag: string }[];
+  messages: { userId: string; userName: string; message: string; timestamp: number }[];
+  isReport?: boolean;
+  reportReason?: string;
+}
+
+interface Report {
+  id: string;
+  reportedAt: number;
+  reporterName: string;
+  reporterTag: string;
+  roomName: string;
+  roomId: string;
+  reason: string;
+  status: 'pending' | 'reviewed' | 'resolved';
+  isReadByAdmin?: boolean;
   participants: { uid: string; name: string; uniqueTag: string }[];
   messages: { userId: string; userName: string; message: string; timestamp: number }[];
 }
@@ -29,6 +47,8 @@ interface UserProfilePageProps {
   subAdminConfig?: Record<string, number>;
   onSubAdminConfigChange?: (cfg: Record<string, number>) => void;
   onDeleteArchive: (id: string) => void;
+  hasNewReports?: boolean;
+  onClearReportsBadge?: () => void;
 }
 
 interface CitySuggestion {
@@ -37,26 +57,131 @@ interface CitySuggestion {
   lon: number;
 }
 
-const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archives, onUpdateProfile, onUpdateOrb, onWithdraw, onBack, onToast, isAdmin, subAdminConfig = {}, onSubAdminConfigChange = () => {}, onDeleteArchive }) => {
+const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archives, onUpdateProfile, onUpdateOrb, onWithdraw, onBack, onToast, isAdmin, subAdminConfig = {}, onSubAdminConfigChange = () => {}, onDeleteArchive, hasNewReports = false, onClearReportsBadge }) => {
   const [activeTab, setActiveTab] = useState<'identity' | 'treasury' | 'archives' | 'social' | 'sanctum' | 'admin'>('identity');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [archiveCategory, setArchiveCategory] = useState<'all' | 'divine' | 'annual' | 'scientific'>('all');
   const [selectedArchive, setSelectedArchive] = useState<SavedFortune | null>(null);
   const [chatCaptures, setChatCaptures] = useState<ChatCapture[]>([]);
   const [expandedCapture, setExpandedCapture] = useState<string | null>(null);
+  const [deletingCapture, setDeletingCapture] = useState<string | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressActivatedRef = useRef(false);
+  const [reports, setReports] = useState<Report[]>([]);
+  const [expandedReport, setExpandedReport] = useState<string | null>(null);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
 
-  // 갈무리 목록 로드 (Social 탭 진입 시)
+  // 갈무리 목록 로드 + 읽음 처리 (Social 탭 진입 시)
   useEffect(() => {
     if (activeTab !== 'social' || !auth.currentUser) return;
-    const q = query(
-      collection(db, "users", auth.currentUser.uid, "chatCaptures"),
-      orderBy("savedAt", "desc"),
-      limit(30)
-    );
+    const uid = auth.currentUser.uid;
+
+    // 갈무리 로드
+    const q = query(collection(db, "users", uid, "chatCaptures"), orderBy("savedAt", "desc"), limit(30));
     getDocs(q).then(snap => {
       setChatCaptures(snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatCapture)));
     }).catch(() => {});
+
+    // 편지함 읽음 처리 (미읽은 항목이 있을 때만)
+    if (orb.mailbox?.some(m => !m.isRead)) {
+      const readMailbox = orb.mailbox.map(m => ({ ...m, isRead: true }));
+      updateDoc(doc(db, 'users', uid), { 'orb.mailbox': readMailbox }).catch(() => {});
+      onUpdateOrb({ ...orb, mailbox: readMailbox });
+    }
+
+    // 관리자: 신고 목록 로드 + 읽음 처리
+    if (isAdmin) {
+      getDocs(query(collection(db, 'reports'), orderBy('reportedAt', 'desc'), limit(50)))
+        .then(snap => {
+          const loaded = snap.docs.map(d => ({ id: d.id, ...d.data() } as Report));
+          setReports(loaded);
+          // 미읽은 신고 일괄 읽음 처리
+          const unread = snap.docs.filter(d => !d.data().isReadByAdmin);
+          if (unread.length > 0) {
+            const batch = unread.map(d => updateDoc(d.ref, { isReadByAdmin: true }));
+            Promise.all(batch).then(() => {
+              setReports(prev => prev.map(r => ({ ...r, isReadByAdmin: true })));
+              onClearReportsBadge?.();
+            }).catch(() => {});
+          }
+        }).catch(() => {});
+    }
   }, [activeTab]);
+
+  // 갈무리 복사 / 다운로드
+  const formatCapture = (cap: ChatCapture): string => {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const dt = new Date(cap.savedAt);
+    const dateStr = `${dt.getFullYear()}.${pad(dt.getMonth()+1)}.${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+    const participants = cap.participants.map(p => `${p.name}${p.uniqueTag ? ` @${p.uniqueTag}` : ''}`).join(', ');
+    const sep = '─'.repeat(36);
+    const lines = [
+      `[나눔방 갈무리]`,
+      `대화방 ID: ${cap.roomId || '(알 수 없음)'}`,
+      `대화방명: ${cap.roomName}`,
+      `저장일시: ${dateStr}`,
+      `참여자: ${participants}`,
+      sep,
+      ...cap.messages.map(m => {
+        if (m.userId === 'system' || m.userId === 'local_entry') return `  ∙ ${m.message}`;
+        const t = new Date(m.timestamp);
+        const time = `${pad(t.getHours())}:${pad(t.getMinutes())}`;
+        return `[${time}] ${m.userName}: ${m.message}`;
+      }),
+      sep,
+    ];
+    return lines.join('\n');
+  };
+
+  const handleCopyCapture = async (cap: ChatCapture) => {
+    try {
+      await navigator.clipboard.writeText(formatCapture(cap));
+      onToast('클립보드에 복사되었습니다.');
+    } catch {
+      onToast('복사에 실패했습니다.');
+    }
+  };
+
+  const handleDownloadCapture = (cap: ChatCapture) => {
+    const text = formatCapture(cap);
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const dt = new Date(cap.savedAt);
+    a.href = url;
+    a.download = `갈무리_${cap.roomName}_${dt.getFullYear()}${pad(dt.getMonth()+1)}${pad(dt.getDate())}_${pad(dt.getHours())}${pad(dt.getMinutes())}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const startLongPress = (capId: string) => {
+    longPressActivatedRef.current = false;
+    longPressTimerRef.current = setTimeout(() => {
+      longPressActivatedRef.current = true;
+      setDeletingCapture(capId);
+    }, 600);
+  };
+
+  const cancelLongPress = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleDeleteCapture = async (capId: string) => {
+    if (!auth.currentUser) return;
+    try {
+      await deleteDoc(doc(db, 'users', auth.currentUser.uid, 'chatCaptures', capId));
+      setChatCaptures(prev => prev.filter(c => c.id !== capId));
+      setDeletingCapture(null);
+      onToast('갈무리가 삭제되었습니다.');
+    } catch {
+      onToast('삭제에 실패했습니다.');
+    }
+  };
 
   // 닉네임 수정 상태 (상시 노출)
   const [editNickname, setEditNickname] = useState(orb.nickname || '');
@@ -222,6 +347,8 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
 
   return (
     <div className="fixed inset-0 z-[5000] bg-[#020617] text-slate-200 flex flex-col animate-in fade-in duration-700">
+      {showTermsModal && <LegalModal title="이용약관" subtitle="Terms of Service" onClose={() => setShowTermsModal(false)}><TermsContent /></LegalModal>}
+      {showPrivacyModal && <LegalModal title="개인정보처리방침" subtitle="Privacy Policy" onClose={() => setShowPrivacyModal(false)}><PrivacyContent /></LegalModal>}
       <header className="relative z-10 border-b border-white/5 px-8 py-6 flex justify-between items-center shrink-0">
         <div className="absolute inset-0 bg-white/[0.02] backdrop-blur-3xl -z-10 pointer-events-none" />
         <div className="flex items-center space-x-6">
@@ -230,7 +357,12 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
           </button>
           <div>
             <h2 className="text-xl font-mystic font-black text-white tracking-widest leading-none uppercase">Private Sanctum</h2>
-            <p className="text-[9px] text-indigo-400 font-black uppercase tracking-[0.4em] mt-1.5">{orb.nickname || profile.name} 님의 전용 영역</p>
+            <p className="text-[9px] text-indigo-400 font-black uppercase tracking-[0.4em] mt-1.5 inline-flex items-center gap-1.5">
+              {orb.nickname || profile.name} 님의 전용 영역
+              {(orb.mailbox?.some(m => !m.isRead) || (isAdmin && hasNewReports)) && (
+                <span className="inline-block w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
+              )}
+            </p>
           </div>
         </div>
         <div className="flex items-center space-x-4">
@@ -238,7 +370,7 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
               <p className="text-[9px] text-slate-500 font-black uppercase">Resonance Level</p>
               <p className="text-sm font-mystic font-black text-white">LV.{orb.level}</p>
            </div>
-           <OrbVisual level={orb.level} className="w-10 h-10 border border-white/10 shadow-lg shadow-indigo-500/10" />
+           <OrbVisual level={orb.level} className="w-10 h-10 border border-white/10 shadow-lg shadow-indigo-500/10" overlayAnimation={(ORB_DECORATIONS.find(d => d.id === orb.activeDecorationId) || ORB_DECORATIONS[0]).overlayAnimation} />
         </div>
       </header>
 
@@ -251,27 +383,35 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
              </svg>
            </button>
 
-           {[
-             { id: 'identity', label: 'Identity', sub: '정체성 및 기록', icon: '🆔' },
-             { id: 'treasury', label: 'Inventory', sub: '개인 인벤토리', icon: '💎' },
-             { id: 'archives', label: 'Archives', sub: '리포트 서고', icon: '📄' },
-             { id: 'social', label: 'Social', sub: '선물 및 편지함', icon: '📧' },
-             { id: 'sanctum', label: 'Sanctum', sub: '개인 성소 꾸미기', icon: '🏛️' },
-           ].map(tab => (
-             <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`w-full py-4 flex items-center transition-all group ${sidebarOpen ? 'px-6 space-x-4' : 'justify-center'} ${activeTab === tab.id ? 'bg-indigo-600/10 border-r-2 border-indigo-500' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
-             >
-               <span className="text-xl shrink-0">{tab.icon}</span>
-               {sidebarOpen && (
-                 <div className="flex flex-col text-left overflow-hidden">
-                   <span className={`text-[11px] font-black uppercase tracking-widest truncate ${activeTab === tab.id ? 'text-indigo-400' : 'text-slate-400'}`}>{tab.label}</span>
-                   <span className="text-[9px] text-slate-600 font-bold truncate">{tab.sub}</span>
-                 </div>
-               )}
-             </button>
-           ))}
+           {(() => {
+             const hasSocialBadge = orb.mailbox?.some(m => !m.isRead) || (isAdmin && hasNewReports);
+             return [
+               { id: 'identity', label: 'Identity', sub: '정체성 및 기록', icon: '🆔' },
+               { id: 'treasury', label: 'Inventory', sub: '개인 인벤토리', icon: '💎' },
+               { id: 'archives', label: 'Archives', sub: '리포트 서고', icon: '📄' },
+               { id: 'social', label: isAdmin ? '문의 및 신고' : 'Social', sub: isAdmin ? '신고·문의 관리' : '선물 및 편지함', icon: isAdmin ? '🚨' : '📧' },
+               { id: 'sanctum', label: 'Sanctum', sub: '개인 성소 꾸미기', icon: '🏛️' },
+             ].map(tab => (
+               <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`w-full py-4 flex items-center transition-all group ${sidebarOpen ? 'px-6 space-x-4' : 'justify-center'} ${activeTab === tab.id ? 'bg-indigo-600/10 border-r-2 border-indigo-500' : 'hover:bg-white/5 opacity-40 hover:opacity-100'}`}
+               >
+                 <span className="relative text-xl shrink-0">
+                   {tab.icon}
+                   {tab.id === 'social' && hasSocialBadge && (
+                     <span className="absolute -top-0.5 -right-1 w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                   )}
+                 </span>
+                 {sidebarOpen && (
+                   <div className="flex flex-col text-left overflow-hidden">
+                     <span className={`text-[11px] font-black uppercase tracking-widest truncate ${activeTab === tab.id ? 'text-indigo-400' : 'text-slate-400'}`}>{tab.label}</span>
+                     <span className="text-[9px] text-slate-600 font-bold truncate">{tab.sub}</span>
+                   </div>
+                 )}
+               </button>
+             ));
+           })()}
            {isAdmin && (
              <button
                onClick={() => setActiveTab('admin')}
@@ -486,6 +626,12 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                          </button>
                       </div>
                    </div>
+                   {/* 약관 링크 */}
+                   <div className="pt-4 border-t border-white/5 flex items-center justify-center space-x-6">
+                     <button onClick={() => setShowTermsModal(true)} className="text-[11px] text-slate-500 hover:text-slate-300 underline underline-offset-2 transition-colors">이용약관</button>
+                     <span className="text-slate-700 text-xs">|</span>
+                     <button onClick={() => setShowPrivacyModal(true)} className="text-[11px] text-slate-500 hover:text-slate-300 underline underline-offset-2 transition-colors">개인정보처리방침</button>
+                   </div>
                 </div>
               )}
 
@@ -531,6 +677,64 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                          ) : (
                            <div className="p-10 text-center text-slate-600 text-[10px] font-black uppercase tracking-widest">No Purchase History</div>
                          )}
+                      </div>
+                   </section>
+
+                   {/* 화폐 안내 */}
+                   <section className="space-y-4">
+                      <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>📖</span><span>화폐 안내</span></h4>
+                      {/* 나디르 */}
+                      <div className="glass rounded-2xl border border-white/5 overflow-hidden">
+                        <div className="flex items-center space-x-2 px-5 py-3 border-b border-white/5 bg-white/[0.02]">
+                          <span>💎</span>
+                          <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest">나디르 (Nadir) — 충전 화폐</p>
+                        </div>
+                        <div className="p-5 space-y-2 text-[12px] text-slate-300 leading-relaxed">
+                          <p>• 현금으로 직접 충전하는 기본 화폐입니다.</p>
+                          <p>• 봉헌 제단에서 사용 시 확률에 따라 <span className="text-amber-400 font-bold">최대 10배 루멘</span>으로 전환됩니다.</p>
+                          <p>• 디지털 재화 특성상 사용함으로써 상품 가치가 훼손되므로 <span className="text-rose-400 font-bold">취소 및 환불이 불가</span>합니다.</p>
+                        </div>
+                      </div>
+                      {/* 루멘 */}
+                      <div className="glass rounded-2xl border border-white/5 overflow-hidden">
+                        <div className="flex items-center space-x-2 px-5 py-3 border-b border-white/5 bg-white/[0.02]">
+                          <span>✨</span>
+                          <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">루멘 (Lumen) — 활동 화폐</p>
+                        </div>
+                        <div className="p-5 space-y-2 text-[12px] text-slate-300 leading-relaxed">
+                          <p>• 봉헌·출석·활동을 통해 획득하는 앱 내 화폐입니다.</p>
+                          <p>• 천기누설·천명수·지성분석 등 <span className="text-indigo-400 font-bold">모든 콘텐츠를 루멘으로 이용</span>합니다.</p>
+                          <p>• 나디르·현금으로 역환전 불가, <span className="text-rose-400 font-bold">환불 불가</span>합니다.</p>
+                          <p>• 회원 탈퇴 시 잔여 루멘은 소멸됩니다.</p>
+                        </div>
+                      </div>
+                      {/* 루멘 획득 방법 */}
+                      <div className="glass rounded-2xl border border-white/5 overflow-hidden">
+                        <div className="flex items-center space-x-2 px-5 py-3 border-b border-white/5 bg-white/[0.02]">
+                          <span>💡</span>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">루멘 획득 방법</p>
+                        </div>
+                        <div className="divide-y divide-white/5">
+                          {[
+                            { icon: '🏛️', title: '봉헌 제단', desc: '나디르 봉헌 시 1배~10배 루멘 보상 (레벨↑ = 고배율 확률↑)', badge: null },
+                            { icon: '📅', title: '매일 방문', desc: '앱 방문 1회 시 +100 루멘 (자정 기준 갱신)', badge: null },
+                            { icon: '📺', title: '광고 시청', desc: '+300 루멘/편, 하루 최대 5회 (1,500 루멘/일)', badge: '준비 중' },
+                            { icon: '🔮', title: '구슬 수련', desc: '탭 시 EXP 획득 → 레벨 성장, 하루 최대 +0.5레벨', badge: null },
+                            { icon: '📝', title: '회람판 글 작성', desc: '+0.1레벨/편, 하루 최대 5편 (+0.5레벨/일)', badge: null },
+                            { icon: '👍', title: '공명(좋아요) 달성', desc: '내 글이 공명 10개 단위 달성 시 +0.1레벨 (자기 공명 제외)', badge: null },
+                          ].map((item, i) => (
+                            <div key={i} className="flex items-start space-x-3 px-5 py-3">
+                              <span className="text-base shrink-0 mt-0.5">{item.icon}</span>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center flex-wrap gap-2 mb-0.5">
+                                  <p className="text-[11px] font-black text-white">{item.title}</p>
+                                  {item.badge && <span className="text-[8px] font-black bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full">{item.badge}</span>}
+                                </div>
+                                <p className="text-[10px] text-slate-500 leading-relaxed">{item.desc}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                    </section>
                 </div>
@@ -600,7 +804,10 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                            orb.mailbox.map(mail => (
                              <div key={mail.id} className={`p-6 rounded-2xl border transition-all ${mail.isRead ? 'bg-white/5 border-white/5 opacity-50' : 'bg-indigo-500/10 border-indigo-500/30'}`}>
                                 <div className="flex justify-between items-start mb-2">
-                                   <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">From: {mail.sender}</p>
+                                   <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-1.5">
+                                     {!mail.isRead && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0" />}
+                                     From: {mail.sender}
+                                   </p>
                                    <span className="text-[9px] text-slate-600">{new Date(mail.timestamp).toLocaleDateString()}</span>
                                 </div>
                                 <h5 className="text-sm font-black text-white mb-1">{mail.title}</h5>
@@ -643,23 +850,87 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                    </section>
 
                    <section className="space-y-6">
-                      <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>🗂️</span><span>대화방 갈무리</span></h4>
+                      <div className="flex flex-col space-y-1">
+                        <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>🗂️</span><span>대화방 갈무리</span></h4>
+                        <p className="text-[10px] text-slate-600 font-medium pl-7">목록을 길게 눌러 삭제할 수 있습니다.</p>
+                      </div>
                       {chatCaptures.length > 0 ? (
                         <div className="space-y-3">
-                          {chatCaptures.map(cap => (
-                            <div key={cap.id} className="glass rounded-[2rem] border border-white/5 overflow-hidden">
-                              <button
-                                className="w-full p-5 flex justify-between items-center hover:bg-white/5 transition-all text-left"
-                                onClick={() => setExpandedCapture(expandedCapture === cap.id ? null : cap.id)}
-                              >
-                                <div>
-                                  <p className="text-sm font-black text-white">{cap.roomName}</p>
+                          {chatCaptures.map(cap => {
+                            const isDeleting = deletingCapture === cap.id;
+                            return (
+                            <div key={cap.id} className={`glass rounded-[2rem] border overflow-hidden transition-colors ${isDeleting ? 'border-rose-500/40 bg-rose-500/5' : 'border-white/5'}`}>
+                              <div className="p-5 flex items-center gap-3">
+                                <button
+                                  className="flex-1 text-left select-none"
+                                  onMouseDown={() => startLongPress(cap.id)}
+                                  onMouseUp={cancelLongPress}
+                                  onMouseLeave={cancelLongPress}
+                                  onTouchStart={() => startLongPress(cap.id)}
+                                  onTouchEnd={cancelLongPress}
+                                  onClick={() => {
+                                    if (longPressActivatedRef.current) { longPressActivatedRef.current = false; return; }
+                                    if (isDeleting) { setDeletingCapture(null); return; }
+                                    setExpandedCapture(expandedCapture === cap.id ? null : cap.id);
+                                  }}
+                                >
+                                  <p className={`text-sm font-black transition-colors ${isDeleting ? 'text-rose-300' : 'text-white'}`}>
+                                    {cap.roomName}{cap.roomId && <span className="text-[10px] font-mono text-slate-600 ml-1.5">[{cap.roomId}]</span>}
+                                  </p>
                                   <p className="text-[10px] text-slate-500 font-bold mt-0.5">
                                     {new Date(cap.savedAt).toLocaleString()} · {cap.participants.length}명 · {cap.messages.length}개 메시지
                                   </p>
+                                </button>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {isDeleting ? (
+                                    <>
+                                      <button
+                                        onClick={() => handleDeleteCapture(cap.id)}
+                                        className="px-3 h-8 bg-rose-600 hover:bg-rose-500 rounded-xl flex items-center gap-1.5 text-white text-[11px] font-black transition-colors"
+                                      >
+                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                          <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+                                        </svg>
+                                        삭제
+                                      </button>
+                                      <button
+                                        onClick={() => setDeletingCapture(null)}
+                                        className="px-3 h-8 bg-white/5 hover:bg-white/10 rounded-xl text-slate-400 hover:text-white transition-colors text-[11px] font-black"
+                                      >취소</button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      {/* 복사 */}
+                                      <button
+                                        onClick={() => handleCopyCapture(cap)}
+                                        className="w-8 h-8 bg-white/5 hover:bg-indigo-600/30 rounded-xl flex items-center justify-center text-slate-400 hover:text-indigo-300 transition-colors"
+                                        title="클립보드에 복사"
+                                      >
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                          <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                        </svg>
+                                      </button>
+                                      {/* 다운로드 */}
+                                      <button
+                                        onClick={() => handleDownloadCapture(cap)}
+                                        className="w-8 h-8 bg-white/5 hover:bg-emerald-600/30 rounded-xl flex items-center justify-center text-slate-400 hover:text-emerald-300 transition-colors"
+                                        title="텍스트 파일로 저장"
+                                      >
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                                        </svg>
+                                      </button>
+                                      {/* 펼치기/접기 */}
+                                      <button
+                                        onClick={() => setExpandedCapture(expandedCapture === cap.id ? null : cap.id)}
+                                        className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-white transition-colors text-sm"
+                                      >
+                                        {expandedCapture === cap.id ? '▲' : '▼'}
+                                      </button>
+                                    </>
+                                  )}
                                 </div>
-                                <span className="text-slate-500 text-sm">{expandedCapture === cap.id ? '▲' : '▼'}</span>
-                              </button>
+                              </div>
                               {expandedCapture === cap.id && (
                                 <div className="border-t border-white/5">
                                   {/* 참여자 목록 */}
@@ -667,9 +938,18 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                                     <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">참여자</p>
                                     <div className="flex flex-wrap gap-2">
                                       {cap.participants.map(p => (
-                                        <span key={p.uid} className="text-[10px] font-bold text-slate-400 bg-white/5 px-2 py-1 rounded-lg">
-                                          {p.name}{p.uniqueTag ? ` @${p.uniqueTag}` : ''}
-                                          {p.uid === cap.participants[0]?.uid ? ' 👑' : ''}
+                                        <span key={p.uid} className="inline-flex items-center gap-0.5 text-[10px] font-bold text-slate-400 bg-white/5 px-2 py-1 rounded-lg">
+                                          <span>{p.name}</span>
+                                          {p.uid === cap.participants[0]?.uid && <span className="ml-0.5">👑</span>}
+                                          {p.uniqueTag && (
+                                            <button
+                                              onClick={() => {
+                                                navigator.clipboard.writeText(p.uniqueTag).then(() => onToast(`@${p.uniqueTag} 복사됨`)).catch(() => {});
+                                              }}
+                                              className="text-indigo-400/70 hover:text-indigo-300 transition-colors active:scale-95"
+                                              title="탭하여 아이디 복사"
+                                            >(@{p.uniqueTag})</button>
+                                          )}
                                         </span>
                                       ))}
                                     </div>
@@ -688,7 +968,8 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                                 </div>
                               )}
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       ) : (
                         <div className="glass p-10 rounded-[2.5rem] border border-dashed border-white/10 text-center">
@@ -696,6 +977,113 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                         </div>
                       )}
                    </section>
+
+                   {/* 관리자 전용: 신고 접수 목록 */}
+                   {isAdmin && (
+                     <section className="space-y-4">
+                       <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>🚨</span><span>신고 접수 목록</span></h4>
+                       {reports.length > 0 ? (
+                         <div className="space-y-3">
+                           {reports.map(rpt => {
+                             const isExpanded = expandedReport === rpt.id;
+                             const statusBadge = rpt.status === 'pending' ? { icon: '🔴', label: 'pending', cls: 'text-rose-400' }
+                               : rpt.status === 'reviewed' ? { icon: '🟡', label: 'reviewed', cls: 'text-yellow-400' }
+                               : { icon: '🟢', label: 'resolved', cls: 'text-emerald-400' };
+                             return (
+                               <div key={rpt.id} className={`glass rounded-[2rem] overflow-hidden border transition-colors ${!rpt.isReadByAdmin ? 'border-rose-500/20' : 'border-white/5'}`}>
+                                 <button
+                                   className="w-full p-5 text-left flex items-start gap-3"
+                                   onClick={() => setExpandedReport(isExpanded ? null : rpt.id)}
+                                 >
+                                   <div className="flex-1 min-w-0">
+                                     <p className="text-sm font-black text-white flex items-center gap-1.5 flex-wrap">
+                                       {!rpt.isReadByAdmin && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0" />}
+                                       {rpt.roomName}<span className="text-[10px] font-mono text-slate-600">[{rpt.roomId}]</span>
+                                     </p>
+                                     <p className="text-[10px] text-slate-500 font-bold mt-1">
+                                       신고자: {rpt.reporterName}{rpt.reporterTag ? ` (@${rpt.reporterTag})` : ''} · 사유: <span className="text-rose-400">{rpt.reason}</span>
+                                     </p>
+                                     <p className="text-[9px] text-slate-600 mt-0.5">
+                                       {rpt.reportedAt ? new Date(rpt.reportedAt).toLocaleString() : ''}
+                                     </p>
+                                   </div>
+                                   <span className={`text-[10px] font-black shrink-0 ${statusBadge.cls}`}>{statusBadge.icon} {statusBadge.label}</span>
+                                 </button>
+                                 {isExpanded && (
+                                   <div className="border-t border-white/5">
+                                     <div className="px-5 py-3 bg-white/[0.02] border-b border-white/5">
+                                       <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">참여자</p>
+                                       <div className="flex flex-wrap gap-2">
+                                         {rpt.participants.map(p => (
+                                           <span key={p.uid} className="text-[10px] font-bold text-slate-400 bg-white/5 px-2 py-1 rounded-lg">
+                                             {p.name}{p.uniqueTag ? ` (@${p.uniqueTag})` : ''}
+                                           </span>
+                                         ))}
+                                       </div>
+                                     </div>
+                                     <div className="max-h-60 overflow-y-auto custom-scroll p-4 space-y-2">
+                                       {rpt.messages.map((m, i) => (
+                                         <div key={i} className={`text-xs ${m.userId === 'system' ? 'text-center text-indigo-400/60 italic' : ''}`}>
+                                           {m.userId !== 'system' && <span className="font-black text-slate-500 mr-2">{m.userName}</span>}
+                                           <span className="text-slate-300">{m.message}</span>
+                                         </div>
+                                       ))}
+                                     </div>
+                                     <div className="px-5 py-3 flex flex-wrap gap-2 border-t border-white/5">
+                                       <button
+                                         onClick={() => updateDoc(doc(db, 'reports', rpt.id), { status: 'reviewed' }).then(() => setReports(prev => prev.map(r => r.id === rpt.id ? { ...r, status: 'reviewed' } : r))).catch(() => {})}
+                                         className="px-4 py-2 bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 text-[10px] font-black rounded-xl hover:bg-yellow-500/30 transition-all"
+                                       >🟡 검토중</button>
+                                       <button
+                                         onClick={() => updateDoc(doc(db, 'reports', rpt.id), { status: 'resolved' }).then(() => setReports(prev => prev.map(r => r.id === rpt.id ? { ...r, status: 'resolved' } : r))).catch(() => {})}
+                                         className="px-4 py-2 bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-[10px] font-black rounded-xl hover:bg-emerald-500/30 transition-all"
+                                       >🟢 처리완료</button>
+                                       <button
+                                         onClick={() => {
+                                           const roomRef = doc(db, 'square', 'rooms', 'list', rpt.roomId);
+                                           updateDoc(roomRef, { isUnderReview: false })
+                                             .then(() => {
+                                               // 소멸 예정 시각이 이미 지났으면 즉시 삭제
+                                               return import('firebase/firestore').then(({ getDoc, deleteDoc }) =>
+                                                 getDoc(roomRef).then(snap => {
+                                                   if (snap.exists()) {
+                                                     const data = snap.data();
+                                                     if (data.deleteAt && data.deleteAt <= Date.now()) {
+                                                       return deleteDoc(roomRef);
+                                                     }
+                                                   }
+                                                 })
+                                               );
+                                             })
+                                             .then(() => onToast('삭제 방지가 해제되었습니다.'))
+                                             .catch(() => onToast('방이 이미 소멸되었거나 오류가 발생했습니다.'));
+                                         }}
+                                         className="px-4 py-2 bg-slate-500/20 border border-slate-500/30 text-slate-400 text-[10px] font-black rounded-xl hover:bg-rose-500/20 hover:border-rose-500/30 hover:text-rose-400 transition-all"
+                                       >🔓 삭제방지 해제</button>
+                                     </div>
+                                   </div>
+                                 )}
+                               </div>
+                             );
+                           })}
+                         </div>
+                       ) : (
+                         <div className="glass p-10 rounded-[2.5rem] border border-dashed border-white/10 text-center">
+                           <p className="text-[10px] text-slate-600 font-black uppercase tracking-widest">접수된 신고가 없습니다.</p>
+                         </div>
+                       )}
+                     </section>
+                   )}
+
+                   {/* 관리자 전용: 문의 접수 목록 */}
+                   {isAdmin && (
+                     <section className="space-y-4">
+                       <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>📩</span><span>문의 접수 목록</span></h4>
+                       <div className="glass p-10 rounded-[2.5rem] border border-dashed border-white/10 text-center">
+                         <p className="text-[10px] text-slate-600 font-black uppercase tracking-widest">문의 기능 준비 중</p>
+                       </div>
+                     </section>
+                   )}
                 </div>
               )}
 
@@ -714,7 +1102,7 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                       
                       <div className="relative animate-float-slow flex flex-col items-center">
                          <div className="absolute -inset-10 bg-indigo-500/10 blur-3xl rounded-full animate-pulse opacity-50"></div>
-                         <OrbVisual level={orb.level} isLarge={true} className="w-48 h-48 sm:w-64 sm:h-64 shadow-[0_0_80px_rgba(99,102,241,0.2)]" />
+                         <OrbVisual level={orb.level} isLarge={true} className="w-48 h-48 sm:w-64 sm:h-64 shadow-[0_0_80px_rgba(99,102,241,0.2)]" overlayAnimation={(ORB_DECORATIONS.find(d => d.id === orb.activeDecorationId) || ORB_DECORATIONS[0]).overlayAnimation} />
                          <div className="mt-8 text-center space-y-1">
                             <p className="text-xs font-black text-indigo-400 uppercase tracking-[0.4em]">Resonance Core</p>
                             <p className="text-[9px] text-slate-600 font-bold uppercase">Stability: 98.2%</p>

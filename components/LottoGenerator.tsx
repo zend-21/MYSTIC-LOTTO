@@ -4,6 +4,7 @@ import { FortuneResult } from '../types';
 
 interface LottoGeneratorProps {
   result: FortuneResult | null;
+  savedAt?: number | null;
   loading: boolean;
   onGenerate: () => void;
   onSlotGenerate: (numbers: number[]) => void;
@@ -42,7 +43,7 @@ const SacredMandala = () => (
   </svg>
 );
 
-const LottoGenerator: React.FC<LottoGeneratorProps> = ({ result, loading, onGenerate, onSlotGenerate, onSave, onReset, hasExtractedToday }) => {
+const LottoGenerator: React.FC<LottoGeneratorProps> = ({ result, savedAt, loading, onGenerate, onSlotGenerate, onSave, onReset, hasExtractedToday }) => {
   const [genMode, setGenMode] = useState<'divine' | 'slots'>('divine');
   const [stopOrderMode, setStopOrderMode] = useState<'sequential' | 'random'>('sequential');
   const [gameCount, setGameCount] = useState<number>(1);
@@ -219,7 +220,17 @@ const LottoGenerator: React.FC<LottoGeneratorProps> = ({ result, loading, onGene
 
                  {/* 오늘의 행운 번호 전체 표시 */}
                  <div className="p-8 bg-amber-500/5 rounded-3xl border border-amber-500/20 space-y-4">
-                    <p className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em] text-center">Fate Consolidated — 오늘의 행운 번호</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-black text-amber-500 uppercase tracking-[0.5em]">Fate Consolidated — 오늘의 행운 번호</p>
+                      {savedAt && (
+                        <p className="text-[9px] font-bold text-slate-600">
+                          추출시간: {(() => {
+                            const d = new Date(savedAt);
+                            return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}. ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                          })()}
+                        </p>
+                      )}
+                    </div>
                     <div className="flex justify-center flex-wrap gap-4">
                        {result.luckyNumbers.map((num, i) => (
                           <div key={i} className={`w-14 h-14 rounded-full flex items-center justify-center font-black text-xl shadow-xl border-2 ${result.coreNumbers.includes(num) ? 'bg-gradient-to-br from-amber-300 to-amber-600 text-slate-950 border-amber-400' : 'bg-slate-800 text-slate-300 border-slate-700'}`}>{num}</div>

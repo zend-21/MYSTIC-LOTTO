@@ -23,3 +23,12 @@ export const spendPoints = async (amount: number, reason: string): Promise<void>
   );
   await fn({ amount, reason });
 };
+
+export const performOffering = async (amount: number): Promise<{ multiplier: number; totalLumen: number }> => {
+  const fn = httpsCallable<{ amount: number }, { multiplier: number; totalLumen: number }>(
+    functions,
+    "performOffering"
+  );
+  const result = await fn({ amount });
+  return result.data;
+};
