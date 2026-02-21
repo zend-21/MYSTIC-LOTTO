@@ -63,7 +63,7 @@ const GoldenCard: React.FC<GoldenCardProps> = ({ ownerName, isVisible, cardId, h
           transition: isDragging ? 'none' : 'transform 1s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.5s',
           cursor: isDragging ? 'grabbing' : 'grab'
         }}
-        className="relative w-full min-w-[280px] max-w-[520px] aspect-[1.58/1] rounded-[3rem] preserve-3d shadow-[0_50px_100px_-20px_rgba(0,0,0,1)] border border-yellow-400/30 overflow-hidden ring-1 ring-white/10"
+        className="relative w-full max-w-[520px] aspect-[1.58/1] rounded-[3rem] preserve-3d shadow-[0_50px_100px_-20px_rgba(0,0,0,1)] border border-yellow-400/30 overflow-hidden ring-1 ring-white/10"
       >
         {/* 카드 본체 레이어 */}
         <div className="absolute inset-0 rounded-[3rem] overflow-hidden backface-hidden bg-[#0d0a00]">
@@ -120,7 +120,7 @@ const GoldenCard: React.FC<GoldenCardProps> = ({ ownerName, isVisible, cardId, h
               </div>
 
               {/* 홀로그램 엠블럼 */}
-              <div className="translate-z-150 rotate-y-20 group-hover:rotate-0 transition-transform duration-1000 mt-2">
+              <div className="translate-z-150 rotate-y-20 group-hover:rotate-0 transition-transform duration-1000" style={{ marginRight: '7px', marginTop: '13px' }}>
                 <div className="w-16 h-16 md:w-20 md:h-20 rounded-[1.5rem] border-2 border-yellow-100/60 bg-gradient-to-br from-white via-amber-400 to-amber-950 flex items-center justify-center shadow-[0_20px_50px_rgba(0,0,0,0.8)] border-b-[8px] border-r-[8px] border-amber-950/70 overflow-hidden">
                    <div className="absolute inset-0 bg-[conic-gradient(from_0deg,#fff,#fbbf24,#fff)] opacity-20 animate-spin-slow"></div>
                    <svg viewBox="0 0 24 24" className="w-8 h-8 md:w-11 md:h-11 text-[#3d2700] drop-shadow-[2px_2px_0px_rgba(255,255,255,0.5)] z-10" fill="currentColor">
