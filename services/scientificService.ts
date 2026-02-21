@@ -106,6 +106,7 @@ export const getScientificRecommendation = async (config: ScientificFilterConfig
     scientificReport: result.data.finalReport,
     matchProbability,
     historicalRank,
+    historyCount: liveHistory.length,
     additionalSets: bradfordSets.length > 1 ? bradfordSets.slice(1) : undefined,
   };
 };

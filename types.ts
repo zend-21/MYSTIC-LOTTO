@@ -90,6 +90,7 @@ export interface ScientificAnalysisResult {
   scientificReport: string;
   matchProbability: number;
   historicalRank: number;
+  historyCount: number;
   additionalSets?: number[][];
 }
 

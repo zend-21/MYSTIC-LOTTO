@@ -39,9 +39,12 @@ import AnnualReportModal from './components/AnnualReportModal';
 import { LegalModal, TermsContent, PrivacyContent } from './components/LegalDocs';
 
 // Firebase imports
-import { auth, db, loginWithGoogle, logout } from './services/firebase';
+import { auth, db, app as firebaseApp, loginWithGoogle, logout } from './services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, deleteDoc, limit as fsLimit, runTransaction, updateDoc, where, getDocs, writeBatch, increment, arrayUnion } from "firebase/firestore";
+import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, deleteDoc, limit as fsLimit, runTransaction, updateDoc, where, getDocs, writeBatch } from "firebase/firestore";
+import { getFunctions, httpsCallable } from 'firebase/functions';
+
+const functions = getFunctions(firebaseApp, 'asia-northeast3');
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -193,15 +196,14 @@ const App: React.FC = () => {
               }
               setOrb(orbData);
 
-              // 매일 첫 방문 보너스 (100 루멘) — 세션당 1회만 처리
+              // 매일 첫 방문 보너스 (100 루멘) — 서버사이드 1일 1회 보장
               if (!hasGrantedVisitBonusRef.current) {
                 hasGrantedVisitBonusRef.current = true;
                 const today = getKSTDateString();
                 if ((orbData.lastVisitDate || '') !== today) {
-                  updateDoc(userDocRef, {
-                    'orb.points': increment(100),
-                    'orb.lastVisitDate': today,
-                  }).then(() => setToast("매일 첫 방문 보너스: +100 루멘! 🌟")).catch(() => {});
+                  httpsCallable(functions, 'claimDailyBonus')({})
+                    .then((res: any) => { if (res.data?.granted) setToast("매일 첫 방문 보너스: +100 루멘! 🌟"); })
+                    .catch(() => {});
                 }
               }
             }
@@ -222,55 +224,32 @@ const App: React.FC = () => {
           setArchives(snapshot.docs.map(d => d.data() as SavedFortune));
         });
 
-        // 선물 inbox 리스너 — 루멘 선물 및 공명 경험치 자동 반영
+        // 선물 inbox 리스너 — 새 항목 감지 시 서버사이드 processInbox 호출
         const inboxRef = collection(db, "users", user.uid, "inbox");
         const unsubscribeInbox = onSnapshot(inboxRef, async (snap) => {
           if (snap.empty) return;
-          let totalGift = 0;
-          let totalExp = 0;
-          let lastGiftSenderName = '';
-          const batch = writeBatch(db);
-          snap.docs.forEach(d => {
-            const data = d.data();
-            if (data.type === 'exp') {
-              totalExp += (data.amount || 0);
-            } else {
-              totalGift += (data.amount || 0);
-              lastGiftSenderName = data.fromName || '';
-              batch.update(userDocRef, {
-                "orb.giftHistory": arrayUnion({
-                  id: d.id,
-                  type: 'received',
-                  targetName: data.fromName || '알 수 없음',
-                  amount: data.amount || 0,
-                  timestamp: data.timestamp || Date.now(),
-                })
-              });
+          try {
+            const res = await httpsCallable<object, { totalGift: number; totalExp: number; senders: string[] }>(functions, 'processInbox')({});
+            const { totalGift, totalExp, senders } = res.data;
+            if (totalGift > 0) {
+              setToast(`${totalGift.toLocaleString()} 루멘을 선물받았습니다! ✨`);
+              setLumenSenderName(senders[senders.length - 1] || '');
+              setLumenReceivedAt(Date.now());
             }
-            batch.delete(d.ref);
-          });
-          if (totalGift > 0) {
-            batch.update(userDocRef, { 'orb.points': increment(totalGift) });
-          }
-          await batch.commit().catch(() => {});
-          if (totalGift > 0) {
-            setToast(`${totalGift.toLocaleString()} 루멘을 선물받았습니다! ✨`);
-            setLumenSenderName(lastGiftSenderName);
-            setLumenReceivedAt(Date.now());
-          }
-          if (totalExp > 0) {
-            // exp는 클라이언트 growOrb로 처리 (레벨 계산 포함)
-            setOrb((prev: OrbState) => {
-              const newExp = prev.exp + totalExp;
-              let newLevel = Math.floor(newExp / 100) + 1;
-              if (ADMIN_UIDS.includes(user.uid)) newLevel = ADMIN_LEVEL;
-              else if (user.uid in subAdminData) newLevel = Math.max(newLevel, SUB_ADMIN_LEVEL);
-              const colors = ['#6366f1', '#8b5cf6', '#d946ef', '#f43f5e', '#f59e0b', '#10b981', '#3b82f6'];
-              const color = colors[newLevel % colors.length];
-              return { ...prev, level: newLevel, exp: newExp, color, aura: color + '80' };
-            });
-            setToast(`게시글 공명 10회 달성! +${(totalExp / 10 * 0.1).toFixed(1)}레벨 🌟`);
-          }
+            if (totalExp > 0) {
+              // exp/level은 클라이언트에서 계산 (레벨업 로직 포함)
+              setOrb((prev: OrbState) => {
+                const newExp = prev.exp + totalExp;
+                let newLevel = Math.floor(newExp / 100) + 1;
+                if (ADMIN_UIDS.includes(user.uid)) newLevel = ADMIN_LEVEL;
+                else if (user.uid in subAdminData) newLevel = Math.max(newLevel, SUB_ADMIN_LEVEL);
+                const colors = ['#6366f1', '#8b5cf6', '#d946ef', '#f43f5e', '#f59e0b', '#10b981', '#3b82f6'];
+                const color = colors[newLevel % colors.length];
+                return { ...prev, level: newLevel, exp: newExp, color, aura: color + '80' };
+              });
+              setToast(`게시글 공명 10회 달성! +${(totalExp / 10 * 0.1).toFixed(1)}레벨 🌟`);
+            }
+          } catch { /* 무시 */ }
         });
 
         // 세션 복구 체크 — 결과 수신 전 앱이 종료된 경우 복구

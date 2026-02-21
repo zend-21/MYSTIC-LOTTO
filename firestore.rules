@@ -19,7 +19,13 @@ service cloud.firestore {
 
     // ── 사용자 개인 데이터 ──────────────────────────────────────────
     match /users/{userId} {
-      allow read, write: if isLoggedIn() && request.auth.uid == userId;
+      allow read: if isLoggedIn() && request.auth.uid == userId;
+      allow create: if isLoggedIn() && request.auth.uid == userId;
+      // orb.points는 Cloud Functions(서버사이드)에서만 변경 가능 — 클라이언트 직접 조작 차단
+      allow update: if isLoggedIn() && request.auth.uid == userId
+        && request.resource.data.get(['orb', 'points'], 0)
+           == resource.data.get(['orb', 'points'], 0);
+      allow delete: if isLoggedIn() && request.auth.uid == userId;
 
       match /archives/{archiveId} {
         allow read, write: if isLoggedIn() && request.auth.uid == userId;

@@ -1233,6 +1233,10 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
               {/* 천명수 */}
               {selectedArchive.type === 'annual' && (
                 <div className="space-y-4">
+                  <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-white/3 border border-white/5">
+                    <span className="text-slate-500 text-[10px] shrink-0 mt-0.5">⚠</span>
+                    <p className="text-[9px] text-slate-500 leading-relaxed font-medium">본 리포트는 사주·점성술·타로 상징 체계를 활용한 오락·참고 목적의 운세 해석입니다. 점성술 분석은 실시간 천문 에페메리스가 아닌 미스틱 상징 체계를 기반으로 하며, 과학적 근거가 없습니다. 로또 번호 추천은 당첨을 보장하지 않습니다.</p>
+                  </div>
                   <div className="p-5 bg-amber-500/5 rounded-2xl border border-amber-500/20 text-center">
                     <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1">{d.year}년 천명수</p>
                     {d.luckyColor && <p className="text-xs text-slate-400">행운의 색: <span className="font-black text-white">{d.luckyColor}</span></p>}

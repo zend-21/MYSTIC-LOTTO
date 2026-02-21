@@ -560,9 +560,9 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                     <p>AC(Arithmetic Complexity)는 번호들 사이의 차이값의 종류를 측정합니다. </p>
                     <ul className="list-disc pl-5 space-y-2">
                       <li><strong className="text-white">AC 0~6:</strong> 숫자들이 너무 규칙적입니다. (예: 2, 4, 6, 8... 또는 1, 2, 3...)</li>
-                      <li><strong className="text-white">AC 7~10:</strong> 복잡도가 높고 불규칙합니다. <strong className="text-cyan-400">역대 당첨 번호의 약 95% 이상이 AC 7~10 지대에 몰려 있습니다.</strong></li>
+                      <li><strong className="text-white">AC 7~10:</strong> 복잡도가 높고 불규칙합니다. <span className="text-cyan-400">역대 당첨 번호의 AC 분포를 분석하면 7~10 구간에 집중되는 경향이 관측됩니다.</span></li>
                     </ul>
-                    <p>따라서 AC 값을 7 이상으로 설정하는 것은 통계적으로 가장 당첨 가능성이 높은 '복잡한 무작위성'을 확보하는 필수 과정입니다.</p>
+                    <p>AC 7 이상으로 설정하면 지나치게 규칙적인 번호 패턴을 필터링할 수 있습니다. 다만 AC 값이 높다고 당첨 확률이 높아지는 것은 아니며, 로또는 각 추첨이 독립적인 무작위 사건입니다.</p>
                   </div>
                 </div>
 
@@ -1315,6 +1315,12 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                 </div>
               )}
 
+              {/* 면책 고지 */}
+              <div className="flex items-start gap-2.5 px-4 py-3 rounded-2xl bg-white/3 border border-white/5">
+                <span className="text-slate-500 text-xs shrink-0 mt-0.5">⚠</span>
+                <p className="text-[10px] text-slate-500 leading-relaxed font-medium">본 분석은 통계적 참고 정보이며 로또 당첨 확률에 대한 과학적 근거가 없습니다. 번호 추천은 오락·참고 목적으로만 제공됩니다.</p>
+              </div>
+
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {/* 벤포드 적합도 카드 — 항상 표시, 적용 여부 배지 포함 */}
                 <div className="relative glass p-7 rounded-[2rem] border border-white/5 space-y-2 shadow-xl">
@@ -1406,6 +1412,14 @@ const ScientificAnalysis: React.FC<ScientificAnalysisProps> = ({ loading, result
                       : '◆ 극단 희귀권 — 역대 당첨 합계의 약 5% 미만이 이 구간에 분포합니다.'}
                   </p>
                 </div>
+                {(result.historyCount ?? 0) < 50 && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-yellow-500/10 border border-yellow-500/20">
+                    <span className="text-yellow-400 text-xs shrink-0">⚠</span>
+                    <p className="text-[9px] text-yellow-400/80 font-bold leading-relaxed">
+                      로또 역대 데이터가 {result.historyCount ?? 0}회분으로 적습니다. 데이터가 충분히 쌓이기 전까지 Z-Score 및 패턴 지표의 신뢰도가 낮을 수 있습니다.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* 카이제곱 분포 균일도 패널 */}

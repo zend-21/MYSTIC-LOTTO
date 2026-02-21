@@ -309,6 +309,10 @@ const LottoGenerator: React.FC<LottoGeneratorProps> = ({ result, savedAt, loadin
                     </section>
                  </div>
                  
+                 <div className="flex items-start gap-2.5 px-4 py-3 rounded-2xl bg-white/3 border border-white/5">
+                    <span className="text-slate-500 text-xs shrink-0 mt-0.5">⚠</span>
+                    <p className="text-[10px] text-slate-500 leading-relaxed font-medium">본 리포트는 사주·타로·점성술 상징 체계를 활용한 오락·참고 목적의 운세 해석입니다. 점성술 분석은 실시간 천문 에페메리스가 아닌 미스틱 상징 체계를 기반으로 하며, 과학적 근거가 없습니다. 로또 번호 추천은 당첨을 보장하지 않습니다.</p>
+                 </div>
                  <section className="p-8 bg-indigo-600/10 rounded-[2.5rem] border border-indigo-500/30">
                     <h4 className="text-indigo-400 font-black text-sm uppercase tracking-wider mb-3">📜 천상의 핵심 전언</h4>
                     <p className="text-lg text-white leading-loose italic font-bold text-center">"{result.recommendationReason}"</p>

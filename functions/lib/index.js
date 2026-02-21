@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getR2UploadUrl = exports.checkModelDeprecation = exports.cleanupExpiredRooms = exports.performOffering = exports.spendPoints = exports.getFixedDestinyNumbers = exports.getScientificReport = exports.getFortuneAndNumbers = void 0;
+exports.getR2UploadUrl = exports.checkModelDeprecation = exports.cleanupExpiredRooms = exports.processInbox = exports.claimDailyBonus = exports.performOffering = exports.spendPoints = exports.getFixedDestinyNumbers = exports.getScientificReport = exports.getFortuneAndNumbers = void 0;
 const admin = require("firebase-admin");
 const https_1 = require("firebase-functions/v2/https");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -113,9 +113,9 @@ exports.getFortuneAndNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], 
 
     미션: 사용자의 사주팔자(명리학), 타로의 상징, 점성술의 행성 배치를 고차원적으로 통합 분석하여 '오늘의 심층 운세 리포트'와 '로또 추천수 6개'를 JSON으로 작성하세요.
 
-    점성학적 정밀 지시사항:
-    1. 제공된 '정밀 좌표(위도/경도)' 또는 '도시'를 바탕으로 출생 당시의 세계표준시(UTC)와의 시차(Timezone Offset)를 정확히 연산하세요.
-    2. 특히 제공된 위도/경도를 근거로 네이탈 차트의 상승궁(Ascendant)과 12하우스(House) 배치를 오차 없이 정교하게 도출하세요. 좌표가 주어졌으므로 추측하지 말고 계산된 값을 사용하세요.
+    미스틱 점성술 지시사항:
+    1. 제공된 출생 좌표(위도/경도) 또는 도시 정보를 바탕으로 해당 지역의 시차(Timezone)를 고려하여 미스틱 체계 내의 상징적 네이탈(Natal, 태어난 순간의 우주 기운 좌표) 배치를 해석하세요.
+    2. 제공된 위도/경도를 근거로 네이탈 차트의 상승궁(Ascendant)과 12하우스(House) 배치를 미스틱 운세 해석 체계에 따라 풍부하게 서술하세요. 이는 천문학적 에페메리스 정밀 계산이 아닌 오락·참고 목적의 상징적 운세 해석임을 전제로 창의적이고 통찰력 있게 표현하세요.
 
     ⚠️ 출력 언어 원칙 (절대 준수):
     - 전문 용어(하우스·트랜짓·네이탈·용신·격국·아르카나·역위 등)는 그대로 사용해도 좋습니다. 단, 처음 등장할 때 반드시 괄호로 짧은 뜻풀이를 붙이세요.
@@ -221,8 +221,8 @@ exports.getScientificReport = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], r
     }
     const ai = new genai_1.GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
     const engineContextMap = {
-        BradfordLegacy: `2006년 10월 영국 브래드포드 대학의 수학 교수·조교를 포함한 교직원 17명이 모든 번호를 여러 조합에 분산 커버하는 전략으로 £530만(약 95억 원, 1인당 £31만)에 당첨된 실화를 구체적으로 언급하세요. 리더 Barry Waterhouse는 "모든 번호가 반드시 포함되는 방식"으로 전략을 바꿨고, 4년간의 개발 끝에 성공했다고 밝혔습니다. 이 기법은 '점'이 아닌 '그물'의 전략이며, 현재 추출된 번호가 그 전략의 핵심 조합임을 강조하세요.`,
-        Bradford: `이 번호는 'Balanced Coverage (공간 균형 분산)' 엔진으로 생성되었습니다. 1~9, 10~19, 20~29, 30~39, 40~45 의 5개 구역에서 균형 있게 번호를 추출하는 공간 분산 전략을 적용했습니다. 각 구역에서 최소 1개 이상의 번호가 선택되어 번호 공간 전체를 균등하게 커버합니다. 이 공간적 분산 배치가 통계적으로 어떤 강점을 제공하는지 전문적으로 분석하세요. Bradford Legacy의 실화와는 별도로, 순수 수학적 공간 균형 이론을 중심으로 설명하세요.`,
+        BradfordLegacy: `이 번호는 'Bradford Legacy (전체 커버리지 분산)' 엔진으로 생성되었습니다. 1~45 전체 번호를 여러 조합에 분산 배치하여 수학적 완전 커버리지를 구현하는 전략입니다. 이 기법은 특정 번호의 독립적 예측이 아닌 확률 공간 전체를 포괄하는 수학적 접근이며, 로또 당첨을 보장하거나 예측하는 것이 아님을 명시하세요. 생성된 조합의 공간 분산 특성과 통계적 균형을 분석하세요.`,
+        Bradford: `이 번호는 'Balanced Coverage (공간 균형 분산)' 엔진으로 생성되었습니다. 1~9, 10~19, 20~29, 30~39, 40~45 의 5개 구역에서 균형 있게 번호를 추출하는 공간 분산 전략을 적용했습니다. 각 구역에서 최소 1개 이상의 번호가 선택되어 번호 공간 전체를 균등하게 커버합니다. 순수 수학적 공간 균형 이론을 중심으로 이 공간적 분산 배치가 통계적으로 어떤 특성을 갖는지 분석하세요.`,
         EntropyMax: `이 번호는 'Entropy Maximizer' 엔진으로 생성되었습니다. 50개의 후보 조합을 동시 생성하여 산술 복잡도(AC값)가 가장 높은 최적 조합을 선별했습니다. AC값이 높을수록 번호 간 간격 패턴의 다양성이 극대화되며, 인위적 편향이 배제된 진정한 엔트로피 상태를 의미합니다. 현재 AC값 ${metrics.acValue}가 달성한 엔트로피 수준을 심층 분석하고, 이 조합이 왜 50개 후보 중 최고 선택인지 설명하세요.`,
         LowFrequency: `이 번호는 'Cold Number Recall (냉수 번호 회수)' 엔진으로 생성되었습니다. 최근 50회 추첨 기록에서 출현 빈도가 낮은 번호(냉수 번호)에 높은 가중치를 부여하여 선별했습니다. 통계적 평균으로의 회귀 원리(Regression to the Mean)에 따라 장기 미출현 번호의 복귀 압력이 높아지는 현상을 전략적으로 활용했습니다. 선택된 번호들의 최근 출현 패턴과 통계적 복귀 가능성을 심층 분석하세요.`,
         Standard: `이 번호는 'Standard Random' 엔진으로 생성되었습니다. 편향 없는 무작위 추출 방식으로, 모든 통계 필터 조건을 통과한 가장 순수한 확률론적 조합입니다. 조합의 균형과 통계적 적합성을 중심으로 분석하세요.`,
@@ -247,7 +247,7 @@ exports.getScientificReport = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], r
       1. 엔진 설명 — ${engineContext}
       2. 벤포드 적합도(${metrics.benfordScore}점)가 주는 통계적 정합성과 산술 복잡도(AC) ${metrics.acValue}의 신뢰성을 전문적으로 설명하세요.
       3. 정규분포 Z-Score(${metrics.sumZScore}σ)를 언급하며, 이 조합의 합계(${metrics.sum})가 통계적 평균(138)에서 얼마나 벗어나 있는지(안정적인지 혹은 변동성이 큰지) 평가하세요. 분포 균일도(${metrics.chiSquaredScore}점)도 함께 서술하여 번호가 5개 구간에 얼마나 고르게 분포하는지 분석하세요.
-      4. "미스틱 로또 연구실 AI 분석팀"으로 마무리하고 면책 조항을 포함하세요.
+      4. "미스틱 로또 연구실 AI 분석팀"으로 마무리하고, 반드시 다음 면책 조항을 마지막에 포함하세요: "본 분석은 통계적 참고 정보이며 로또 당첨 확률에 대한 과학적 근거가 없습니다. 번호 추천은 오락·참고 목적으로만 제공됩니다."
     `;
     const flashModel = await getActiveModel("flash");
     const response = await callWithRetry(() => ai.models.generateContent({
@@ -269,7 +269,7 @@ exports.getScientificReport = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY], r
             .slice(1)
             .map((s, i) => `[조합 ${i + 2}] ${s.join(", ")}`)
             .join("\n");
-        finalReport += `\n\n【 브래드포드 100% 커버리지 보완 세트 】\n당첨 확률의 그물을 완성하기 위해 함께 구매를 권장하는 나머지 7개 조합입니다:\n\n${otherSets}\n\n※ 위 8개 조합을 모두 구매할 경우 이번 회차의 모든 번호(1~45)가 당신의 티켓 뭉치 안에 반드시 존재하게 됩니다.`;
+        finalReport += `\n\n【 전체 커버리지 보완 조합 (참고용) 】\n1~45 전체 번호를 수학적으로 완전 커버하기 위한 나머지 7개 참고 조합입니다:\n\n${otherSets}\n\n※ 위 8개 조합은 1~45의 모든 번호를 포함하는 수학적 완전성을 가집니다. 이는 통계적 참고 정보이며, 로또 당첨을 보장하거나 구매를 권장하는 것이 아닙니다.`;
     }
     // ③ AI 성공 후에만 루멘 차감 + 결과 저장
     const sessionRef = db.collection("users").doc(uid).collection("session").doc("data");
@@ -373,7 +373,7 @@ exports.getFixedDestinyNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY]
     - 'luckyNumbers': 올해 사용자를 수호할 정확히 4개의 '천명수'를 도출하세요. 반드시 1에서 45 사이의 서로 다른 정수여야 합니다. 4개의 숫자는 반드시 아래 4가지 방법으로 각각 1개씩 도출하며, 모두 ${currentYear}년에 특화된 값으로 매년 달라져야 합니다(평생 고정값 사용 금지):
       ① 사주 세운수(歲運數): ${currentYear}년의 60갑자 순번(甲子=1, 乙丑=2, … 癸亥=60 순환)을 1~45 범위로 환산한 값. 2026년은 丙午년(43번째)이므로 43. 단, 결과가 45를 초과하면 45를 뺀 값을 사용하세요.
       ② 개인 연도수(Personal Year Number): 사용자의 생월+생일+${currentYear}년을 모두 더한 뒤 두 자리 이하가 될 때까지 환원. 단, 환원 과정에서 1~45 범위 내의 두 자리 중간값(11, 22, 33, 44)이 나오면 그대로 사용하고, 최종값이 반드시 1~45 사이여야 합니다.
-      ③ 목성 트랜짓 도수: ${currentYear}년 목성(Jupiter)이 황도를 통과하는 주요 위치의 도수(0~360°)를 45로 나눈 나머지에 1을 더한 값(1~45). 목성의 실제 천문 데이터를 기반으로 계산하세요.
+      ③ 목성 트랜짓 도수: 목성(Jupiter)이 상징하는 팽창·행운의 기운이 황도 12궁 내에서 점하는 미스틱 체계 도수. 목성의 약 12년 공전 주기를 기준으로 ${currentYear}년에 해당하는 상징적 위치 도수(0~360°)를 45로 나눈 나머지에 1을 더한 값(1~45)으로 산출하세요. (천문학적 에페메리스가 아닌 미스틱 운세 해석 체계 기준)
       ④ 연도별 타로 연간 카드수: ${currentYear}년의 수비학적 연도수(2+0+2+6=10 등)와 사용자 생월+생일을 합산한 개인 연간 타로 포지션을 메이저 아르카나(0~21) 내에서 환원한 뒤, 해당 카드 번호에 2를 곱하거나 연도수를 더해 1~45 범위로 확장하세요.
     - 'numberExplanations': 위 4개 숫자 각각에 대해, 어떤 방법(①세운수/②개인연도수/③목성트랜짓/④연간타로)으로 왜 이 숫자가 도출되었는지 구체적인 계산 과정을 포함하여 300자 이상 상세히 풀이하세요. 각 풀이에서 생일을 언급할 때 해당 분야의 기준(사주→음력, 타로·점성술→양력)에 맞는 날짜를 표기하세요.
     - 'luckyColor': 올해의 기운을 보강해줄 행운의 색상명(한글+영문)과 정확한 16진수 색상코드(예: #1a2b3c)를 함께 기재하세요.
@@ -383,7 +383,7 @@ exports.getFixedDestinyNumbers = (0, https_1.onCall)({ secrets: [GEMINI_API_KEY]
     - 'bestMonths' & 'worstMonths': 가장 기운이 왕성한 달과 가장 신중해야 할 달을 구체적으로 지목하고 이유를 설명하세요.
     - 'wealthDetailed', 'loveDetailed', 'healthDetailed': 각 섹션별로 700자 이상의 초장문 풀이. (조심할 점, 도전할 점 포함)
     - 'tarotDetailed': 올해를 상징하는 타로 카드를 선정하고 그 의미를 500자 이상 서술하세요. 생일 언급 시 양력 날짜 사용.
-    - 'astrologyDetailed': 목성과 토성의 이동, 사용자 하우스의 변화를 포함한 점성학적 연간 트랜짓 리포트. 생일 언급 시 양력 날짜 사용.
+    - 'astrologyDetailed': 목성(팽창·행운)과 토성(제약·성장)이 상징하는 기운의 흐름과 사용자 하우스에 대한 미스틱 점성술 해석. 이는 실시간 천문 에페메리스가 아닌 오락·참고 목적의 운세 해석 체계임을 전제로, 올 한 해의 행성 기운과 개인적 운명의 상호작용을 창의적이고 통찰력 있게 서술하세요. 생일 언급 시 양력 날짜 사용.
     - 'sajuDeepDive': 음력 설 기준 세운(歲運) 심층 분석. 사주 풀이에서 생년월일 언급 시 반드시 음력 날짜만 사용하고 양력을 언급하지 마세요.
   `;
     const proModel = await getActiveModel("pro");
@@ -601,6 +601,78 @@ exports.performOffering = (0, https_1.onCall)({ region: "asia-northeast3" }, asy
         });
     });
     return { multiplier, totalLumen };
+});
+// ──────────────────────────────────────────────
+// 출석 보너스 (1일 1회, 서버사이드 원자적 보장)
+// ──────────────────────────────────────────────
+exports.claimDailyBonus = (0, https_1.onCall)({ region: "asia-northeast3" }, async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError("unauthenticated", "로그인이 필요합니다.");
+    const uid = request.auth.uid;
+    if (uid === ADMIN_UID)
+        return { granted: false };
+    // KST(UTC+9) 기준 오늘 날짜
+    const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const today = `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, "0")}-${String(kst.getUTCDate()).padStart(2, "0")}`;
+    const userRef = db.collection("users").doc(uid);
+    return db.runTransaction(async (tx) => {
+        var _a, _b, _c;
+        const snap = await tx.get(userRef);
+        if (!snap.exists)
+            throw new https_1.HttpsError("not-found", "사용자를 찾을 수 없습니다.");
+        if (((_c = (_b = (_a = snap.data()) === null || _a === void 0 ? void 0 : _a.orb) === null || _b === void 0 ? void 0 : _b.lastVisitDate) !== null && _c !== void 0 ? _c : "") === today)
+            return { granted: false };
+        tx.update(userRef, {
+            "orb.points": admin.firestore.FieldValue.increment(100),
+            "orb.lastVisitDate": today,
+        });
+        return { granted: true };
+    });
+});
+// ──────────────────────────────────────────────
+// inbox 처리 (루멘 선물 수신, 서버사이드 원자적)
+// ──────────────────────────────────────────────
+exports.processInbox = (0, https_1.onCall)({ region: "asia-northeast3" }, async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError("unauthenticated", "로그인이 필요합니다.");
+    const uid = request.auth.uid;
+    const inboxSnap = await db.collection("users").doc(uid).collection("inbox").get();
+    if (inboxSnap.empty)
+        return { processed: 0, totalGift: 0, totalExp: 0, senders: [] };
+    let totalGift = 0;
+    let totalExp = 0;
+    const senders = [];
+    const giftEntries = [];
+    inboxSnap.docs.forEach((d) => {
+        const data = d.data();
+        if (data.type === "exp") {
+            totalExp += data.amount || 0;
+        }
+        else {
+            const amt = data.amount || 0;
+            totalGift += amt;
+            if (data.fromName)
+                senders.push(data.fromName);
+            giftEntries.push({
+                id: d.id,
+                type: "received",
+                targetName: data.fromName || "알 수 없음",
+                amount: amt,
+                timestamp: data.timestamp || Date.now(),
+            });
+        }
+    });
+    const batch = db.batch();
+    inboxSnap.docs.forEach((d) => batch.delete(d.ref));
+    if (totalGift > 0) {
+        const userRef = db.collection("users").doc(uid);
+        batch.update(userRef, {
+            "orb.points": admin.firestore.FieldValue.increment(totalGift),
+            "orb.giftHistory": admin.firestore.FieldValue.arrayUnion(...giftEntries),
+        });
+    }
+    await batch.commit();
+    return { processed: inboxSnap.docs.length, totalGift, totalExp, senders };
 });
 // ──────────────────────────────────────────────
 // 3일 미활동 방 자동 소멸 (매일 자정 KST 실행)
