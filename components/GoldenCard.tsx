@@ -5,9 +5,10 @@ interface GoldenCardProps {
   ownerName: string;
   isVisible: boolean;
   cardId?: string;
+  hasCard?: boolean;
 }
 
-const GoldenCard: React.FC<GoldenCardProps> = ({ ownerName, isVisible, cardId }) => {
+const GoldenCard: React.FC<GoldenCardProps> = ({ ownerName, isVisible, cardId, hasCard = true }) => {
   const [rotate, setRotate] = useState({ x: 0, y: 0 });
   const [glare, setGlare] = useState({ x: 50, y: 50, opacity: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -42,7 +43,8 @@ const GoldenCard: React.FC<GoldenCardProps> = ({ ownerName, isVisible, cardId })
   const onTouchMove = (e: React.TouchEvent) => { if (isDragging) { if (e.cancelable) e.preventDefault(); handleMove(e.touches[0].clientX, e.touches[0].clientY); } };
   const onTouchEnd = () => { setIsDragging(false); setRotate({ x: 0, y: 0 }); setGlare(prev => ({ ...prev, opacity: 0 })); };
 
-  const displayId = cardId || "7777-8888-24K-9999";
+  const displayId = hasCard ? (cardId || "7823-4591-24K-8047") : "7823-4591-24K-8047";
+  const displayName = hasCard ? ownerName : null;
 
   return (
     <div className="relative group perspective-2500 select-none py-16 touch-none w-full flex justify-center items-center">
@@ -61,7 +63,7 @@ const GoldenCard: React.FC<GoldenCardProps> = ({ ownerName, isVisible, cardId })
           transition: isDragging ? 'none' : 'transform 1s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.5s',
           cursor: isDragging ? 'grabbing' : 'grab'
         }}
-        className="relative w-full max-w-[520px] aspect-[1.58/1] rounded-[3rem] preserve-3d shadow-[0_50px_100px_-20px_rgba(0,0,0,1)] border border-yellow-400/30 overflow-hidden ring-1 ring-white/10"
+        className="relative w-full min-w-[280px] max-w-[520px] aspect-[1.58/1] rounded-[3rem] preserve-3d shadow-[0_50px_100px_-20px_rgba(0,0,0,1)] border border-yellow-400/30 overflow-hidden ring-1 ring-white/10"
       >
         {/* 카드 본체 레이어 */}
         <div className="absolute inset-0 rounded-[3rem] overflow-hidden backface-hidden bg-[#0d0a00]">
@@ -130,13 +132,19 @@ const GoldenCard: React.FC<GoldenCardProps> = ({ ownerName, isVisible, cardId })
 
             {/* 카드 하단 정보 */}
             <div className="flex justify-between items-end translate-z-120">
-              <div className="flex flex-col space-y-2">
+              <div className="flex flex-col space-y-2" style={{ paddingLeft: '5px' }}>
                 <span className="text-[9px] font-black text-amber-950/70 uppercase tracking-[0.4em] drop-shadow-sm">Authorized Bearer</span>
-                <span className="text-3xl md:text-4xl font-bold font-mystic tracking-tight engraved-deep leading-none truncate max-w-[300px]">
-                   {ownerName}<span className="text-xs ml-3 opacity-60 font-sans tracking-normal font-bold">Resonance Certified</span>
-                </span>
+                {displayName ? (
+                  <span className="text-[26px] md:text-[32px] font-bold font-mystic tracking-tight engraved-deep leading-tight whitespace-nowrap max-w-[300px] block" style={{ marginBottom: '-5px' }}>
+                    {displayName}<span className="text-xs ml-3 opacity-60 font-sans tracking-normal font-bold">Resonance Certified</span>
+                  </span>
+                ) : (
+                  <span className="text-[11px] font-bold font-mystic tracking-[0.2em] leading-none border-b border-dashed border-amber-950/25 pb-1.5 max-w-[200px] animate-engrave-hint">
+                    여기에 당신의 이름을 각인하세요
+                  </span>
+                )}
                 <div className="w-full h-1 bg-amber-950/10 rounded-full mt-2"></div>
-                <p className="text-[10px] font-black text-amber-950/60 tabular-nums tracking-widest uppercase">ID: {displayId}</p>
+                <p className={`text-[10px] font-black tabular-nums tracking-widest uppercase ${hasCard ? 'text-amber-950/60' : 'text-amber-950/25'}`}>ID: {displayId}</p>
               </div>
               <div className="translate-z-100 shrink-0 mb-2">
                 <div className="px-6 py-4 bg-black/20 rounded-2xl border border-white/20 shadow-[inset_0_2px_10px_rgba(0,0,0,0.5)] backdrop-blur-3xl">
@@ -201,6 +209,15 @@ const GoldenCard: React.FC<GoldenCardProps> = ({ ownerName, isVisible, cardId })
         .animate-pulse-slow {
           position: absolute; left: 50%; top: 50%;
           animation: pulse-slow 6s ease-in-out infinite;
+        }
+
+        @keyframes engrave-hint {
+          0%, 100% { opacity: 0.45; }
+          50% { opacity: 0.85; }
+        }
+        .animate-engrave-hint {
+          color: rgba(61,39,0,0.9);
+          animation: engrave-hint 3s ease-in-out infinite;
         }
       `}</style>
     </div>

@@ -59,6 +59,7 @@ const App: React.FC = () => {
   // 약관 모달
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+  const [showGoldenCardInfo, setShowGoldenCardInfo] = useState(false);
   // 로그인 화면 동의 체크박스
   const [loginAgreedTerms, setLoginAgreedTerms] = useState(false);
   const [loginAgreedPrivacy, setLoginAgreedPrivacy] = useState(false);
@@ -557,10 +558,17 @@ const App: React.FC = () => {
   };
 
   const buyGoldenCard = async () => {
+    if (orb.hasGoldenCard) { onToast("이미 천부인을 소유하고 계십니다."); return; }
     if (orb.points < GOLDEN_CARD_PRICE) { onToast("유물을 소유하기 위한 루멘이 부족합니다."); return; }
     try {
       await spendPoints(GOLDEN_CARD_PRICE, "golden_card");
-      const cardId = `MYSTIC-${Math.floor(1000 + Math.random() * 8999)}-GOLD`;
+      // 구매일(일월년) + 랜덤 4자리 → 중복 불가
+      const now = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const ddmm = `${pad(now.getDate())}${pad(now.getMonth() + 1)}`;
+      const yyyy = String(now.getFullYear());
+      const rand4 = Array.from({ length: 4 }, () => Math.floor(Math.random() * 10)).join('');
+      const cardId = `${ddmm}-${yyyy}-24K-${rand4}`;
       setOrb(prev => ({ ...prev, hasGoldenCard: true, goldenCardId: cardId } as OrbState));
       onToast("천상의 유물 '천부인'의 주인이 되셨습니다!");
     } catch (err: any) {
@@ -744,6 +752,36 @@ const App: React.FC = () => {
       {/* 약관 모달 */}
       {showTermsModal && <LegalModal title="이용약관" subtitle="Terms of Service" onClose={() => setShowTermsModal(false)}><TermsContent /></LegalModal>}
       {showPrivacyModal && <LegalModal title="개인정보처리방침" subtitle="Privacy Policy" onClose={() => setShowPrivacyModal(false)}><PrivacyContent /></LegalModal>}
+
+      {/* 천부인 서사 모달 */}
+      {showGoldenCardInfo && (
+        <div className="fixed inset-0 z-[5500] flex items-center justify-center px-6" onClick={() => setShowGoldenCardInfo(false)}>
+          <div className="absolute inset-0 bg-black/85 backdrop-blur-xl" />
+          <div className="relative glass p-10 rounded-[3rem] border border-yellow-500/30 w-full max-w-sm animate-in zoom-in-95 duration-300 shadow-[0_40px_80px_rgba(0,0,0,0.9)]" onClick={e => e.stopPropagation()}>
+            <div className="text-4xl text-center mb-4">⚜️</div>
+            <h3 className="text-2xl font-mystic font-black text-yellow-400 text-center mb-1 tracking-widest">天符印</h3>
+            <p className="text-[9px] font-black text-amber-500/50 text-center uppercase tracking-[0.4em] mb-7">Soul Core Emblem · Eternal Grade</p>
+            <div className="space-y-4 text-xs leading-relaxed">
+              <p className="text-slate-300">
+                천상의 기운이 응결되어 탄생한 황금 인장 <span className="text-yellow-400 font-black">천부인(天符印)</span>은, 우주의 파동과 소유자의 영혼이 완전히 동기화되었음을 증명하는 영원한 증표입니다.
+              </p>
+              <p className="text-slate-400">
+                태초의 빛이 물질로 굳어진 이 인장에는 소유자의 본명이 각인되고, 이 세상 어디에도 존재하지 않는 단 하나의 고유 인식번호가 부여됩니다. 같은 번호의 인장은 결코 존재하지 않습니다.
+              </p>
+              <p className="text-slate-400">
+                천부인을 소유한 자에게는 신령한 기운의 파동이 더욱 깊이 닿는다 전해집니다. 각인된 이름은 영원히 이 카드와 함께하며, 어떠한 이유로도 거래되거나 양도될 수 없습니다.
+              </p>
+            </div>
+            <div className="mt-6 glass p-4 rounded-2xl border border-yellow-500/20 text-center">
+              <p className="text-[10px] font-black text-yellow-500/60 uppercase tracking-widest">50,000 루멘 · 1인 1매 한정 · 영구 귀속</p>
+            </div>
+            <button
+              onClick={() => setShowGoldenCardInfo(false)}
+              className="mt-5 w-full py-3 bg-yellow-600/20 border border-yellow-500/30 text-yellow-400 font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-yellow-600/30 transition-all"
+            >확인</button>
+          </div>
+        </div>
+      )}
 
       {/* 기존 유저 약관 동의 오버레이 (termsAcceptedAt 없는 경우) */}
       {termsAccepted === false && (
@@ -943,11 +981,23 @@ const App: React.FC = () => {
         {activeTab === 'science' && (<section className="animate-in fade-in duration-700"><ScientificAnalysis loading={scienceLoading} result={scienceResult} onGenerate={onScienceGenerateClick} lottoHistory={lottoHistory} uid={currentUser?.uid} /></section>)}
         {activeTab === 'treasury' && (
           <section className="flex flex-col items-center space-y-16 animate-in fade-in duration-700">
-             <div className="text-center relative"><h2 className="text-4xl font-mystic font-black text-yellow-500 tracking-[0.6em] mb-4 uppercase">Sacred Vault</h2></div>
+             <div className="text-center relative flex flex-col items-center">
+               <div className="relative inline-block">
+                 <h2 className="text-4xl font-mystic font-black text-yellow-500 tracking-[0.6em] mb-4 uppercase">Sacred Vault</h2>
+                 <button
+                   onClick={() => setShowGoldenCardInfo(true)}
+                   className="absolute -right-7 -bottom-1 w-5 h-5 rounded-full border border-yellow-500/40 bg-yellow-500/10 text-yellow-500/60 text-[10px] font-black flex items-center justify-center hover:bg-yellow-500/20 hover:text-yellow-400 transition-all"
+                 >?</button>
+               </div>
+             </div>
              <div className="w-full flex flex-col items-center space-y-24">
                <div className="w-full flex flex-col items-center">
-                 <GoldenCard ownerName={profile.name} isVisible={true} cardId={orb.goldenCardId} />
-                 {!orb.hasGoldenCard && <button onClick={buyGoldenCard} className="mt-10 px-16 py-6 bg-gradient-to-r from-yellow-600 to-amber-700 text-slate-950 font-black rounded-full shadow-2xl uppercase tracking-[0.3em] text-lg border-t-2 border-white/40">유물 소유하기 (50,000 L)</button>}
+                 <GoldenCard ownerName={orb.hasGoldenCard ? profile.name : ''} isVisible={true} cardId={orb.goldenCardId} hasCard={!!orb.hasGoldenCard} />
+                 {!orb.hasGoldenCard ? (
+                   <button onClick={buyGoldenCard} className="mt-10 px-16 py-6 bg-gradient-to-r from-yellow-600 to-amber-700 text-slate-950 font-black rounded-full shadow-2xl uppercase tracking-[0.3em] text-lg border-t-2 border-white/40">유물 소유하기 (50,000 L)</button>
+                 ) : (
+                   <p className="mt-10 text-center text-sm font-bold text-amber-500/60 italic tracking-wide leading-relaxed">당신은 이 영험하고 신령한 황금 카드의 주인이십니다.</p>
+                 )}
                </div>
                <div className="w-full max-w-5xl">
                  {currentDestiny ? (
