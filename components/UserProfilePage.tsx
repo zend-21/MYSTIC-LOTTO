@@ -413,6 +413,20 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
     return lines.join('\n');
   };
 
+  // Firestore Timestamp 또는 숫자 → Date 변환
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tsToDate = (val: any): Date | null => {
+    if (!val) return null;
+    if (typeof val?.toDate === 'function') return val.toDate();
+    if (typeof val === 'number') return new Date(val);
+    return null;
+  };
+  const fmtDate = (val: unknown) => {
+    const d = tsToDate(val);
+    if (!d || isNaN(d.getTime())) return '';
+    return d.toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  };
+
   const handleCopyCapture = async (cap: ChatCapture) => {
     try {
       await navigator.clipboard.writeText(formatCapture(cap));
@@ -1489,7 +1503,7 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                          <div className="glass rounded-[1.5rem] border border-white/5 overflow-hidden">
                            {myReports.length > 0 ? myReports.map((r, idx) => {
                              const isExpanded = expandedMyReport === r.id;
-                             const dateStr = r.reportedAt ? new Date(r.reportedAt as number).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+                             const dateStr = fmtDate(r.reportedAt);
                              return (
                                <div key={r.id} className={idx > 0 ? 'border-t border-white/5' : ''}>
                                  {/* 요약 행 */}
@@ -1613,71 +1627,106 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                                    className="w-full p-5 text-left flex items-start gap-3"
                                    onClick={() => setExpandedReport(isExpanded ? null : rpt.id)}
                                  >
-                                   <div className="flex-1 min-w-0">
-                                     <p className="text-sm font-black text-white flex items-center gap-1.5 flex-wrap">
-                                       {!rpt.isReadByAdmin && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0" />}
-                                       {rpt.roomName}<span className="text-[10px] font-mono text-slate-600">[{rpt.roomId}]</span>
-                                     </p>
-                                     <p className="text-[10px] text-slate-500 font-bold mt-1">
-                                       신고자: {rpt.reporterName}{rpt.reporterTag ? ` (@${rpt.reporterTag})` : ''} · 사유: <span className="text-rose-400">{rpt.reason}</span>
-                                     </p>
-                                     <p className="text-[9px] text-slate-600 mt-0.5">
-                                       {rpt.reportedAt ? new Date(rpt.reportedAt).toLocaleString() : ''}
-                                     </p>
+                                   <div className="flex-1 min-w-0 space-y-0.5">
+                                     {!rpt.isReadByAdmin && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse inline-block mb-1" />}
+                                     {rpt.type === 'direct' ? (
+                                       <>
+                                         <p className="text-[10px] text-slate-400 font-bold">
+                                           신고자: <span className="text-slate-300">{rpt.reporterName}</span>
+                                           {rpt.reporterTag ? <span className="font-mono text-slate-500"> (@{rpt.reporterTag.replace(/^@/, '')})</span> : null}
+                                         </p>
+                                         <p className="text-[10px] text-slate-400 font-bold">
+                                           피신고자: <span className="font-mono text-rose-400/80">@{(rpt.targetTag || '').replace(/^@/, '')}</span>
+                                           <span className="text-rose-400 ml-2">{rpt.reason}</span>
+                                         </p>
+                                       </>
+                                     ) : (
+                                       <>
+                                         <p className="text-sm font-black text-white truncate">
+                                           {rpt.roomName}<span className="text-[10px] font-mono text-slate-600 ml-1">[{rpt.roomId}]</span>
+                                         </p>
+                                         <p className="text-[10px] text-slate-500 font-bold">
+                                           신고자: {rpt.reporterName}{rpt.reporterTag ? ` (@${rpt.reporterTag.replace(/^@/, '')})` : ''}
+                                           <span className="text-rose-400 ml-2">{rpt.reason}</span>
+                                         </p>
+                                       </>
+                                     )}
+                                     <p className="text-[9px] text-slate-600">{fmtDate(rpt.reportedAt)}</p>
                                    </div>
                                    <span className={`text-[10px] font-black shrink-0 ${statusBadge.cls}`}>{statusBadge.icon} {statusBadge.label}</span>
                                  </button>
                                  {isExpanded && (
                                    <div className="border-t border-white/5">
-                                     <div className="px-5 py-3 bg-white/[0.02] border-b border-white/5">
-                                       <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">참여자</p>
-                                       <div className="flex flex-wrap gap-2">
-                                         {rpt.participants.map(p => (
-                                           <span key={p.uid} className="text-[10px] font-bold text-slate-400 bg-white/5 px-2 py-1 rounded-lg">
-                                             {p.name}{p.uniqueTag ? ` (@${p.uniqueTag})` : ''}
-                                           </span>
-                                         ))}
+                                     {/* 직접 신고: 내용 + 이미지 */}
+                                     {rpt.type === 'direct' ? (
+                                       <div className="px-5 py-4 space-y-3">
+                                         {rpt.targetNickname && <p className="text-[10px] text-slate-500">피신고인 닉네임: <span className="text-slate-300">{rpt.targetNickname}</span></p>}
+                                         {rpt.content && <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{rpt.content}</p>}
+                                         {rpt.imageUrls && rpt.imageUrls.length > 0 && (
+                                           <div className="flex gap-2 flex-wrap">
+                                             {rpt.imageUrls.map((url, i) => (
+                                               <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="w-20 h-20 rounded-xl overflow-hidden border border-white/10 block">
+                                                 <img src={url} alt="" className="w-full h-full object-cover" />
+                                               </a>
+                                             ))}
+                                           </div>
+                                         )}
                                        </div>
-                                     </div>
-                                     <div className="max-h-60 overflow-y-auto custom-scroll p-4 space-y-2">
-                                       {rpt.messages.map((m, i) => (
-                                         <div key={i} className={`text-xs ${m.userId === 'system' ? 'text-center text-indigo-400/60 italic' : ''}`}>
-                                           {m.userId !== 'system' && <span className="font-black text-slate-500 mr-2">{m.userName}</span>}
-                                           <span className="text-slate-300">{m.message}</span>
+                                     ) : (
+                                       <>
+                                         <div className="px-5 py-3 bg-white/[0.02] border-b border-white/5">
+                                           <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">참여자</p>
+                                           <div className="flex flex-wrap gap-2">
+                                             {rpt.participants.map(p => (
+                                               <span key={p.uid} className="text-[10px] font-bold text-slate-400 bg-white/5 px-2 py-1 rounded-lg">
+                                                 {p.name}{p.uniqueTag ? ` (@${p.uniqueTag})` : ''}
+                                               </span>
+                                             ))}
+                                           </div>
                                          </div>
-                                       ))}
-                                     </div>
-                                     <div className="px-5 py-3 flex flex-wrap gap-2 border-t border-white/5">
+                                         <div className="max-h-60 overflow-y-auto custom-scroll p-4 space-y-2">
+                                           {rpt.messages.map((m, i) => (
+                                             <div key={i} className={`text-xs ${m.userId === 'system' ? 'text-center text-indigo-400/60 italic' : ''}`}>
+                                               {m.userId !== 'system' && <span className="font-black text-slate-500 mr-2">{m.userName}</span>}
+                                               <span className="text-slate-300">{m.message}</span>
+                                             </div>
+                                           ))}
+                                         </div>
+                                       </>
+                                     )}
+                                     <div className="px-4 py-3 flex gap-1.5 border-t border-white/5">
                                        <button
                                          onClick={() => updateDoc(doc(db, 'reports', rpt.id), { status: 'reviewed' }).then(() => setReports(prev => prev.map(r => r.id === rpt.id ? { ...r, status: 'reviewed' } : r))).catch(() => {})}
-                                         className="px-4 py-2 bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 text-[10px] font-black rounded-xl hover:bg-yellow-500/30 transition-all"
+                                         className="flex-1 py-2 bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 text-[9px] font-black rounded-xl hover:bg-yellow-500/30 transition-all"
                                        >🟡 검토중</button>
                                        <button
                                          onClick={() => updateDoc(doc(db, 'reports', rpt.id), { status: 'resolved' }).then(() => setReports(prev => prev.map(r => r.id === rpt.id ? { ...r, status: 'resolved' } : r))).catch(() => {})}
-                                         className="px-4 py-2 bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-[10px] font-black rounded-xl hover:bg-emerald-500/30 transition-all"
+                                         className="flex-1 py-2 bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-[9px] font-black rounded-xl hover:bg-emerald-500/30 transition-all"
                                        >🟢 처리완료</button>
-                                       <button
-                                         onClick={() => {
-                                           const roomRef = doc(db, 'square', 'rooms', 'list', rpt.roomId);
-                                           updateDoc(roomRef, { isUnderReview: false })
-                                             .then(() => {
-                                               // 소멸 예정 시각이 이미 지났으면 즉시 삭제
-                                               return import('firebase/firestore').then(({ getDoc, deleteDoc }) =>
-                                                 getDoc(roomRef).then(snap => {
-                                                   if (snap.exists()) {
-                                                     const data = snap.data();
-                                                     if (data.deleteAt && data.deleteAt <= Date.now()) {
-                                                       return deleteDoc(roomRef);
+                                       {rpt.type !== 'direct' && rpt.roomId && (
+                                         <button
+                                           onClick={() => {
+                                             const roomRef = doc(db, 'square', 'rooms', 'list', rpt.roomId);
+                                             updateDoc(roomRef, { isUnderReview: false })
+                                               .then(() => {
+                                                 // 소멸 예정 시각이 이미 지났으면 즉시 삭제
+                                                 return import('firebase/firestore').then(({ getDoc, deleteDoc }) =>
+                                                   getDoc(roomRef).then(snap => {
+                                                     if (snap.exists()) {
+                                                       const data = snap.data();
+                                                       if (data.deleteAt && data.deleteAt <= Date.now()) {
+                                                         return deleteDoc(roomRef);
+                                                       }
                                                      }
-                                                   }
-                                                 })
-                                               );
-                                             })
-                                             .then(() => onToast('삭제 방지가 해제되었습니다.'))
-                                             .catch(() => onToast('방이 이미 소멸되었거나 오류가 발생했습니다.'));
-                                         }}
-                                         className="px-4 py-2 bg-slate-500/20 border border-slate-500/30 text-slate-400 text-[10px] font-black rounded-xl hover:bg-rose-500/20 hover:border-rose-500/30 hover:text-rose-400 transition-all"
-                                       >🔓 삭제방지 해제</button>
+                                                   })
+                                                 );
+                                               })
+                                               .then(() => onToast('삭제 방지가 해제되었습니다.'))
+                                               .catch(() => onToast('방이 이미 소멸되었거나 오류가 발생했습니다.'));
+                                           }}
+                                           className="flex-1 py-2 bg-slate-500/20 border border-slate-500/30 text-slate-400 text-[9px] font-black rounded-xl hover:bg-rose-500/20 hover:border-rose-500/30 hover:text-rose-400 transition-all"
+                                         >🔓 삭제방지</button>
+                                       )}
                                      </div>
                                      {/* 관리자 답변 입력 */}
                                      <div className="px-5 pb-4 space-y-2 border-t border-white/5 pt-3">
