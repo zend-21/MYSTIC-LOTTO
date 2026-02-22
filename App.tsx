@@ -75,6 +75,7 @@ const App: React.FC = () => {
   // 기존 유저 약관 동의 여부 (Firestore 기준)
   const [termsAccepted, setTermsAccepted] = useState<boolean | null>(null);
   const [view, setView] = useState<'main' | 'square' | 'profile' | 'analysis'>('main');
+  const [showProfileOverlay, setShowProfileOverlay] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [isRitualUnlocked, setIsRitualUnlocked] = useState(false);
@@ -97,6 +98,9 @@ const App: React.FC = () => {
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [showMiningModal, setShowMiningModal] = useState(false);
   const [hasNewReports, setHasNewReports] = useState(false);
+  const [hasNewInquiries, setHasNewInquiries] = useState(false);
+  const [hasRepReply, setHasRepReply] = useState(false);
+  const [hasInqReply, setHasInqReply] = useState(false);
 
   const [archives, setArchives] = useState<SavedFortune[]>([]);
   const [offeringData, setOfferingData] = useState<{amount: number, multiplier: number} | null>(null);
@@ -305,16 +309,26 @@ const App: React.FC = () => {
           }
         }).catch(() => {});
 
-        // 관리자 전용: 미열람 신고 실시간 감지
+        // 관리자 전용: 미열람 신고/문의 실시간 감지 / 일반 사용자: 답변 알림
         let unsubscribeReports = () => {};
+        let unsubscribeInquiries = () => {};
+        let unsubscribeRepReply = () => {};
+        let unsubscribeInqReply = () => {};
         if (ADMIN_UIDS.includes(user.uid)) {
           const reportsQ = query(collection(db, 'reports'), where('isReadByAdmin', '==', false), fsLimit(1));
-          unsubscribeReports = onSnapshot(reportsQ, snap => {
-            setHasNewReports(!snap.empty);
-          });
+          unsubscribeReports = onSnapshot(reportsQ, snap => setHasNewReports(!snap.empty));
+          const inquiriesQ = query(collection(db, 'inquiries'), where('isReadByAdmin', '==', false), fsLimit(1));
+          unsubscribeInquiries = onSnapshot(inquiriesQ, snap => setHasNewInquiries(!snap.empty));
+        } else {
+          // 신고 답변 미읽음
+          const repReplyQ = query(collection(db, 'reports'), where('reporterUid', '==', user.uid), where('isReplyRead', '==', false));
+          unsubscribeRepReply = onSnapshot(repReplyQ, snap => setHasRepReply(snap.docs.some(d => !!d.data().adminReply)));
+          // 문의 답변 미읽음
+          const inqReplyQ = query(collection(db, 'inquiries'), where('uid', '==', user.uid), where('isReplyRead', '==', false));
+          unsubscribeInqReply = onSnapshot(inqReplyQ, snap => setHasInqReply(snap.docs.some(d => !!d.data().adminReply)));
         }
 
-        return () => { unsubscribeUser(); unsubscribeArchives(); unsubscribeInbox(); unsubscribeReports(); };
+        return () => { unsubscribeUser(); unsubscribeArchives(); unsubscribeInbox(); unsubscribeReports(); unsubscribeInquiries(); unsubscribeRepReply(); unsubscribeInqReply(); };
       } else {
         setCurrentUser(null);
         setProfile(null);
@@ -882,8 +896,9 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {view === 'square' && <CelestialSquare profile={profile} orb={orb} onUpdatePoints={updatePoints} onUpdateFavorites={updateFavorites} onBack={() => setView('main')} onToast={onToast} onGrowFromPost={handlePostCreated} isAdmin={isAdmin} lumenReceivedAt={lumenReceivedAt} lumenSenderName={lumenSenderName} />}
-      {view === 'profile' && <UserProfilePage profile={profile} orb={orb} archives={archives} onUpdateProfile={onUpdateProfile} onUpdateOrb={onUpdateOrb} onWithdraw={handleWithdrawAction} onBack={() => setView('main')} onToast={onToast} isAdmin={isAdmin} subAdminConfig={subAdminConfig} onSubAdminConfigChange={setSubAdminConfig} onDeleteArchive={deleteArchive} hasNewReports={hasNewReports} onClearReportsBadge={() => setHasNewReports(false)} />}
+      {view === 'square' && <CelestialSquare profile={profile} orb={orb} onUpdatePoints={updatePoints} onUpdateFavorites={updateFavorites} onBack={() => setView('main')} onToast={onToast} onGrowFromPost={handlePostCreated} isAdmin={isAdmin} lumenReceivedAt={lumenReceivedAt} lumenSenderName={lumenSenderName} onOpenSelfProfile={() => setShowProfileOverlay(true)} />}
+      {view === 'square' && showProfileOverlay && <div className="fixed inset-0 z-[9000]"><UserProfilePage profile={profile} orb={orb} archives={archives} onUpdateProfile={onUpdateProfile} onUpdateOrb={onUpdateOrb} onWithdraw={handleWithdrawAction} onBack={() => setShowProfileOverlay(false)} onToast={onToast} isAdmin={isAdmin} subAdminConfig={subAdminConfig} onSubAdminConfigChange={setSubAdminConfig} onDeleteArchive={deleteArchive} hasNewReports={hasNewReports} onClearReportsBadge={() => setHasNewReports(false)} hasNewInquiries={hasNewInquiries} onClearInquiriesBadge={() => setHasNewInquiries(false)} hasReplyNotif={hasRepReply || hasInqReply} onClearReplyNotif={() => { setHasRepReply(false); setHasInqReply(false); }} /></div>}
+      {view === 'profile' && <UserProfilePage profile={profile} orb={orb} archives={archives} onUpdateProfile={onUpdateProfile} onUpdateOrb={onUpdateOrb} onWithdraw={handleWithdrawAction} onBack={() => setView('main')} onToast={onToast} isAdmin={isAdmin} subAdminConfig={subAdminConfig} onSubAdminConfigChange={setSubAdminConfig} onDeleteArchive={deleteArchive} hasNewReports={hasNewReports} onClearReportsBadge={() => setHasNewReports(false)} hasNewInquiries={hasNewInquiries} onClearInquiriesBadge={() => setHasNewInquiries(false)} hasReplyNotif={hasRepReply || hasInqReply} onClearReplyNotif={() => { setHasRepReply(false); setHasInqReply(false); }} />}
       {view === 'analysis' && <MysticAnalysisLab lottoHistory={lottoHistory} onBack={() => setView('main')} />}
       {offeringData && <DivineEffect amount={offeringData.amount} multiplier={offeringData.multiplier} onComplete={handleOfferingComplete} />}
       {toast && (<div className="fixed inset-0 flex items-center justify-center z-[6000] pointer-events-none px-6"><div className="bg-slate-900/40 backdrop-blur-3xl text-white px-12 py-7 rounded-[2.5rem] shadow-[0_40px_100px_rgba(0,0,0,0.8)] border border-white/10 text-center animate-in zoom-in-95 duration-500 max-w-md"><p className="text-sm sm:text-xl font-bold leading-tight whitespace-pre-line">{toast}</p></div></div>)}

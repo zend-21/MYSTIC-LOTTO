@@ -120,8 +120,28 @@ service cloud.firestore {
 
     // ── 신고: reports/{reportId} ───────────────────────────────────
     match /reports/{reportId} {
+      // 신고 접수: 로그인 유저
       allow create: if isLoggedIn();
+      // 관리자: 전체 읽기/수정
       allow read, write: if isAdmin();
+      // 신고자 본인: 자신의 신고 읽기 + isReplyRead 필드만 수정(답변 읽음 처리)
+      allow read: if isLoggedIn() && resource.data.reporterUid == request.auth.uid;
+      allow update: if isLoggedIn()
+        && resource.data.reporterUid == request.auth.uid
+        && onlyChanges(['isReplyRead']);
+    }
+
+    // ── 문의: inquiries/{inquiryId} ────────────────────────────────
+    match /inquiries/{inquiryId} {
+      // 문의 접수: 로그인 유저
+      allow create: if isLoggedIn();
+      // 관리자: 전체 읽기/수정
+      allow read, write: if isAdmin();
+      // 문의자 본인: 자신의 문의 읽기 + isReplyRead 필드만 수정
+      allow read: if isLoggedIn() && resource.data.uid == request.auth.uid;
+      allow update: if isLoggedIn()
+        && resource.data.uid == request.auth.uid
+        && onlyChanges(['isReplyRead']);
     }
 
     // ── 게시판: square/board/posts/{postId} ────────────────────────

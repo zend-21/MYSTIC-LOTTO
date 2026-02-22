@@ -1,12 +1,15 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { UserProfile, OrbState, SavedFortune, FortuneResult, AnnualDestiny, ScientificAnalysisResult, ORB_DECORATIONS, CalendarType } from '../types';
+import { UserProfile, OrbState, SavedFortune, FortuneResult, AnnualDestiny, ScientificAnalysisResult, ORB_DECORATIONS, CalendarType, MailMessage, Inquiry } from '../types';
 import { LegalModal, TermsContent, PrivacyContent } from './LegalDocs';
 import KoreanLunarCalendar from 'korean-lunar-calendar';
 import { OrbVisual } from './FortuneOrb';
 import ModelStatusCard from './admin/ModelStatusCard';
 import AdminSanctum from './AdminSanctum';
 import { db, auth } from '../services/firebase';
-import { collection, query, orderBy, limit, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, orderBy, limit, getDocs, deleteDoc, doc, updateDoc, addDoc, serverTimestamp, where } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+
+const appFunctions = getFunctions(undefined, 'asia-northeast3');
 
 interface ChatCapture {
   id: string;
@@ -23,13 +26,19 @@ interface ChatCapture {
 interface Report {
   id: string;
   reportedAt: number;
+  reporterUid?: string;
   reporterName: string;
   reporterTag: string;
   roomName: string;
   roomId: string;
   reason: string;
+  type?: 'chat' | 'direct';
+  content?: string;
   status: 'pending' | 'reviewed' | 'resolved';
   isReadByAdmin?: boolean;
+  adminReply?: string;
+  isReplyRead?: boolean;
+  imageUrls?: string[];
   participants: { uid: string; name: string; uniqueTag: string }[];
   messages: { userId: string; userName: string; message: string; timestamp: number }[];
 }
@@ -49,6 +58,10 @@ interface UserProfilePageProps {
   onDeleteArchive: (id: string) => void;
   hasNewReports?: boolean;
   onClearReportsBadge?: () => void;
+  hasNewInquiries?: boolean;
+  onClearInquiriesBadge?: () => void;
+  hasReplyNotif?: boolean;
+  onClearReplyNotif?: () => void;
 }
 
 interface CitySuggestion {
@@ -57,7 +70,7 @@ interface CitySuggestion {
   lon: number;
 }
 
-const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archives, onUpdateProfile, onUpdateOrb, onWithdraw, onBack, onToast, isAdmin, subAdminConfig = {}, onSubAdminConfigChange = () => {}, onDeleteArchive, hasNewReports = false, onClearReportsBadge }) => {
+const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archives, onUpdateProfile, onUpdateOrb, onWithdraw, onBack, onToast, isAdmin, subAdminConfig = {}, onSubAdminConfigChange = () => {}, onDeleteArchive, hasNewReports = false, onClearReportsBadge, hasNewInquiries = false, onClearInquiriesBadge, hasReplyNotif = false, onClearReplyNotif }) => {
   const [activeTab, setActiveTab] = useState<'identity' | 'treasury' | 'archives' | 'social' | 'sanctum' | 'admin'>('identity');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [archiveCategory, setArchiveCategory] = useState<'all' | 'divine' | 'annual' | 'scientific'>('all');
@@ -66,6 +79,58 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
   const [chatCaptures, setChatCaptures] = useState<ChatCapture[]>([]);
   const [expandedCapture, setExpandedCapture] = useState<string | null>(null);
   const [deletingCapture, setDeletingCapture] = useState<string | null>(null);
+
+  // 루멘 전수 내역 삭제
+  const [giftEditMode, setGiftEditMode] = useState(false);
+  const [selectedGiftIds, setSelectedGiftIds] = useState<Set<string>>(new Set());
+  const [giftDeleteConfirm, setGiftDeleteConfirm] = useState<{ ids: string[]; label: string } | null>(null);
+
+  // social 탭 섹션 접기/펼치기
+  const [mailboxOpen, setMailboxOpen] = useState(false);
+  const [giftOpen, setGiftOpen] = useState(false);
+  const [capturesOpen, setCapturesOpen] = useState(false);
+  const [reportsOpen, setReportsOpen] = useState(false);
+
+  // 신고·문의 (비관리자: 내 신고/문의 내역, 관리자: 문의 목록)
+  const [inquiries, setInquiries] = useState<Inquiry[]>([]);
+  const [myReports, setMyReports] = useState<Report[]>([]);
+  const [myInquiries, setMyInquiries] = useState<Inquiry[]>([]);
+  const [reportForm, setReportForm] = useState({ reason: '', content: '', targetNickname: '', targetTag: '' });
+  const [inquiryContent, setInquiryContent] = useState('');
+  const [reportImages, setReportImages] = useState<File[]>([]);
+  const [reportImagePreviews, setReportImagePreviews] = useState<string[]>([]);
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  const [isSubmittingInquiry, setIsSubmittingInquiry] = useState(false);
+  const [reportSectionOpen, setReportSectionOpen] = useState(false);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [inquirySectionOpen, setInquirySectionOpen] = useState(false);
+  const [inquiriesOpen, setInquiriesOpen] = useState(false);
+  const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
+  const [expandedInquiry, setExpandedInquiry] = useState<string | null>(null);
+  const [expandedMyReport, setExpandedMyReport] = useState<string | null>(null);
+
+  const REPORT_REASONS = ['욕설·비방', '사기·거래 유도', '음란·성적 발언', '명예 훼손', '스팸·도배', '기타'];
+
+  const toggleGiftSelect = (id: string) => {
+    setSelectedGiftIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const handleDeleteGiftHistory = async (idsToDelete: string[]) => {
+    if (!auth.currentUser || idsToDelete.length === 0) return;
+    const filtered = (orb.giftHistory || []).filter(g => !idsToDelete.includes(g.id));
+    try {
+      await updateDoc(doc(db, 'users', auth.currentUser.uid), { 'orb.giftHistory': filtered });
+      onUpdateOrb({ ...orb, giftHistory: filtered });
+      setSelectedGiftIds(new Set());
+      if (filtered.length === 0) setGiftEditMode(false);
+    } catch {
+      onToast('삭제에 실패했습니다.');
+    }
+  };
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressActivatedRef = useRef(false);
   const [reports, setReports] = useState<Report[]>([]);
@@ -73,7 +138,7 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
 
-  // 갈무리 목록 로드 + 읽음 처리 (Social 탭 진입 시)
+  // 갈무리 로드 + 신고/문의 목록 로드 (Social 탭 진입 시)
   useEffect(() => {
     if (activeTab !== 'social' || !auth.currentUser) return;
     const uid = auth.currentUser.uid;
@@ -84,31 +149,244 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
       setChatCaptures(snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatCapture)));
     }).catch(() => {});
 
-    // 편지함 읽음 처리 (미읽은 항목이 있을 때만)
-    if (orb.mailbox?.some(m => !m.isRead)) {
-      const readMailbox = orb.mailbox.map(m => ({ ...m, isRead: true }));
-      updateDoc(doc(db, 'users', uid), { 'orb.mailbox': readMailbox }).catch(() => {});
-      onUpdateOrb({ ...orb, mailbox: readMailbox });
-    }
-
-    // 관리자: 신고 목록 로드 + 읽음 처리
     if (isAdmin) {
+      // 관리자: 신고 + 문의 목록 로드 (읽음 처리는 섹션 열 때)
       getDocs(query(collection(db, 'reports'), orderBy('reportedAt', 'desc'), limit(50)))
+        .then(snap => setReports(snap.docs.map(d => ({ id: d.id, ...d.data() } as Report))))
+        .catch(() => {});
+      getDocs(query(collection(db, 'inquiries'), orderBy('createdAt', 'desc'), limit(50)))
+        .then(snap => setInquiries(snap.docs.map(d => ({ id: d.id, ...d.data() } as Inquiry))))
+        .catch(() => {});
+    } else {
+      // 일반 사용자: 내 신고/문의 내역 로드 (복합 인덱스 불필요하도록 orderBy 제거 → 클라이언트 정렬)
+      getDocs(query(collection(db, 'reports'), where('reporterUid', '==', uid), limit(20)))
         .then(snap => {
-          const loaded = snap.docs.map(d => ({ id: d.id, ...d.data() } as Report));
-          setReports(loaded);
-          // 미읽은 신고 일괄 읽음 처리
-          const unread = snap.docs.filter(d => !d.data().isReadByAdmin);
-          if (unread.length > 0) {
-            const batch = unread.map(d => updateDoc(d.ref, { isReadByAdmin: true }));
-            Promise.all(batch).then(() => {
-              setReports(prev => prev.map(r => ({ ...r, isReadByAdmin: true })));
-              onClearReportsBadge?.();
-            }).catch(() => {});
-          }
-        }).catch(() => {});
+          const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as Report));
+          docs.sort((a, b) => (b.reportedAt as number) - (a.reportedAt as number));
+          setMyReports(docs);
+        })
+        .catch(e => console.error('reports load error:', e));
+      getDocs(query(collection(db, 'inquiries'), where('uid', '==', uid), limit(20)))
+        .then(snap => {
+          const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as Inquiry));
+          docs.sort((a, b) => (b.createdAt as number) - (a.createdAt as number));
+          setMyInquiries(docs);
+        })
+        .catch(e => console.error('inquiries load error:', e));
     }
   }, [activeTab]);
+
+  // 편지함 열기 + 읽음 처리
+  const handleOpenMailbox = () => {
+    const opening = !mailboxOpen;
+    setMailboxOpen(opening);
+    if (opening && orb.mailbox?.some(m => !m.isRead) && auth.currentUser) {
+      const readMailbox = orb.mailbox.map(m => ({ ...m, isRead: true }));
+      updateDoc(doc(db, 'users', auth.currentUser.uid), { 'orb.mailbox': readMailbox }).catch(() => {});
+      onUpdateOrb({ ...orb, mailbox: readMailbox });
+    }
+  };
+
+  // 신고 목록 열기 + 읽음 처리
+  const handleOpenReports = () => {
+    const opening = !reportsOpen;
+    setReportsOpen(opening);
+    if (opening && reports.some(r => !r.isReadByAdmin)) {
+      const unread = reports.filter(r => !r.isReadByAdmin);
+      Promise.all(unread.map(r => updateDoc(doc(db, 'reports', r.id), { isReadByAdmin: true })))
+        .then(() => {
+          setReports(prev => prev.map(r => ({ ...r, isReadByAdmin: true })));
+          onClearReportsBadge?.();
+        }).catch(() => {});
+    }
+  };
+
+  // 관리자 문의 섹션 열기 + 읽음 처리
+  const handleOpenInquiries = () => {
+    const opening = !inquiriesOpen;
+    setInquiriesOpen(opening);
+    if (opening && inquiries.some(i => !i.isReadByAdmin)) {
+      const unread = inquiries.filter(i => !i.isReadByAdmin);
+      Promise.all(unread.map(i => updateDoc(doc(db, 'inquiries', i.id), { isReadByAdmin: true })))
+        .then(() => {
+          setInquiries(prev => prev.map(i => ({ ...i, isReadByAdmin: true })));
+          onClearInquiriesBadge?.();
+        }).catch(() => {});
+    }
+  };
+
+  // 일반 사용자: 신고 섹션 열기 + 답변 읽음 처리
+  const handleOpenReportSection = () => {
+    const opening = !reportSectionOpen;
+    setReportSectionOpen(opening);
+    if (opening && auth.currentUser) {
+      const unread = myReports.filter(r => r.adminReply && !r.isReplyRead);
+      if (unread.length > 0) {
+        Promise.all(unread.map(r => updateDoc(doc(db, 'reports', r.id), { isReplyRead: true })))
+          .then(() => {
+            setMyReports(prev => prev.map(r => ({ ...r, isReplyRead: true })));
+            if (!myInquiries.some(i => i.adminReply && !i.isReplyRead)) onClearReplyNotif?.();
+          }).catch(() => {});
+      }
+    }
+  };
+
+  // 일반 사용자: 문의 섹션 열기 + 답변 읽음 처리
+  const handleOpenInquirySection = () => {
+    const opening = !inquirySectionOpen;
+    setInquirySectionOpen(opening);
+    if (opening && auth.currentUser) {
+      const unread = myInquiries.filter(i => i.adminReply && !i.isReplyRead);
+      if (unread.length > 0) {
+        Promise.all(unread.map(i => updateDoc(doc(db, 'inquiries', i.id), { isReplyRead: true })))
+          .then(() => {
+            setMyInquiries(prev => prev.map(i => ({ ...i, isReplyRead: true })));
+            if (!myReports.some(r => r.adminReply && !r.isReplyRead)) onClearReplyNotif?.();
+          }).catch(() => {});
+      }
+    }
+  };
+
+  // 이미지 선택 (최대 3장, 1장당 50MB)
+  const MAX_IMAGE_SIZE = 50 * 1024 * 1024;
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files: File[] = e.target.files ? (Array.from(e.target.files) as File[]).filter(f => f.type.startsWith('image/')) : [];
+    const remaining = 3 - reportImages.length;
+    if (remaining <= 0) { onToast('이미지는 최대 3장까지 첨부할 수 있습니다.'); return; }
+    const oversized = files.filter(f => f.size > MAX_IMAGE_SIZE);
+    if (oversized.length > 0) { onToast('이미지 1장당 최대 50MB까지 첨부할 수 있습니다.'); e.target.value = ''; return; }
+    const selected = files.slice(0, remaining);
+    const previews = selected.map((f: File) => URL.createObjectURL(f));
+    setReportImages(prev => [...prev, ...selected]);
+    setReportImagePreviews(prev => [...prev, ...previews]);
+    e.target.value = '';
+  };
+
+  const handleRemoveImage = (idx: number) => {
+    URL.revokeObjectURL(reportImagePreviews[idx]);
+    setReportImages(prev => prev.filter((_, i) => i !== idx));
+    setReportImagePreviews(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  // 신고 제출 (일반 사용자 직접 신고)
+  const handleSubmitReport = async () => {
+    if (!auth.currentUser || !reportForm.reason || !reportForm.targetTag.trim() || !reportForm.content.trim()) return;
+    setIsSubmittingReport(true);
+    try {
+      const uid = auth.currentUser.uid;
+      const name = orb.nickname || profile.name;
+      const tag = orb.uniqueTag || '';
+      const targetTag = reportForm.targetTag.trim().replace(/^@/, '');
+
+      // R2 이미지 업로드
+      const imageUrls: string[] = [];
+      for (const file of reportImages) {
+        const fn = httpsCallable(appFunctions, 'getR2UploadUrl');
+        const result = await fn({ fileName: file.name, contentType: file.type });
+        const { uploadUrl, publicUrl } = result.data as { uploadUrl: string; publicUrl: string };
+        const res = await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
+        if (!res.ok) throw new Error('이미지 업로드 실패');
+        imageUrls.push(publicUrl);
+      }
+
+      const docRef = await addDoc(collection(db, 'reports'), {
+        type: 'direct',
+        reporterUid: uid,
+        reporterName: name,
+        reporterTag: tag,
+        targetNickname: reportForm.targetNickname.trim(),
+        targetTag,
+        reason: reportForm.reason,
+        content: reportForm.content.trim(),
+        imageUrls,
+        status: 'pending',
+        isReadByAdmin: false,
+        reportedAt: serverTimestamp(),
+        roomId: '',
+        roomName: '',
+        participants: [],
+        messages: [],
+      });
+      setMyReports(prev => [{
+        id: docRef.id,
+        type: 'direct',
+        reporterUid: uid,
+        reporterName: name,
+        reporterTag: tag,
+        reason: reportForm.reason,
+        content: reportForm.content.trim(),
+        imageUrls,
+        status: 'pending',
+        isReadByAdmin: false,
+        reportedAt: Date.now(),
+        roomId: '',
+        roomName: '',
+        participants: [],
+        messages: [],
+      }, ...prev]);
+      setReportForm({ reason: '', content: '', targetNickname: '', targetTag: '' });
+      reportImagePreviews.forEach(url => URL.revokeObjectURL(url));
+      setReportImages([]);
+      setReportImagePreviews([]);
+      setReportModalOpen(false);
+      onToast('신고가 접수되었습니다. 검토 후 조치하겠습니다.');
+    } catch { onToast('신고 접수에 실패했습니다.'); }
+    finally { setIsSubmittingReport(false); }
+  };
+
+  // 문의 제출 (일반 사용자)
+  const handleSubmitInquiry = async () => {
+    if (!auth.currentUser || !inquiryContent.trim()) return;
+    setIsSubmittingInquiry(true);
+    try {
+      const uid = auth.currentUser.uid;
+      const name = orb.nickname || profile.name;
+      const tag = orb.uniqueTag || '';
+      const docRef = await addDoc(collection(db, 'inquiries'), {
+        uid,
+        name,
+        tag,
+        content: inquiryContent.trim(),
+        status: 'pending',
+        isReadByAdmin: false,
+        createdAt: serverTimestamp(),
+      });
+      setMyInquiries(prev => [{
+        id: docRef.id,
+        uid,
+        name,
+        tag,
+        content: inquiryContent.trim(),
+        status: 'pending',
+        isReadByAdmin: false,
+        createdAt: Date.now(),
+      }, ...prev]);
+      setInquiryContent('');
+      onToast('문의가 접수되었습니다.');
+    } catch { onToast('문의 접수에 실패했습니다.'); }
+    finally { setIsSubmittingInquiry(false); }
+  };
+
+  // 관리자 답변 전송
+  const handleSendReply = async (colType: 'report' | 'inquiry', id: string) => {
+    const text = replyInputs[id]?.trim();
+    if (!text) return;
+    const colName = colType === 'report' ? 'reports' : 'inquiries';
+    try {
+      await updateDoc(doc(db, colName, id), {
+        adminReply: text,
+        status: colType === 'report' ? 'reviewed' : 'answered',
+        isReplyRead: false,
+      });
+      if (colType === 'report') {
+        setReports(prev => prev.map(r => r.id === id ? { ...r, adminReply: text, status: 'reviewed' } : r));
+      } else {
+        setInquiries(prev => prev.map(i => i.id === id ? { ...i, adminReply: text, status: 'answered' } : i));
+      }
+      setReplyInputs(prev => ({ ...prev, [id]: '' }));
+      onToast('답변이 전송되었습니다.');
+    } catch { onToast('답변 전송에 실패했습니다.'); }
+  };
 
   // 갈무리 복사 / 다운로드
   const formatCapture = (cap: ChatCapture): string => {
@@ -370,6 +648,111 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
           </div>
         </div>
       )}
+
+      {/* 루멘 전수 내역 삭제 확인 모달 */}
+      {giftDeleteConfirm && (
+        <div className="fixed inset-0 z-[9500] flex items-center justify-center px-6" onClick={() => setGiftDeleteConfirm(null)}>
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" />
+          <div className="relative glass p-10 rounded-[3rem] border border-rose-500/30 w-full max-w-sm space-y-8 shadow-[0_0_80px_rgba(239,68,68,0.15)]" onClick={e => e.stopPropagation()}>
+            <div className="text-center space-y-3">
+              <div className="w-14 h-14 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mx-auto">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgb(239,68,68)" strokeWidth="2.5"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+              </div>
+              <h3 className="text-lg font-black text-white tracking-wider">전수 내역 삭제</h3>
+              <p className="text-sm text-slate-400 leading-relaxed">{giftDeleteConfirm.label}<br/><span className="text-rose-400 font-bold">삭제된 내역은 복구할 수 없습니다.</span></p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setGiftDeleteConfirm(null)} className="flex-1 py-4 bg-white/5 border border-white/10 rounded-2xl text-slate-300 font-black text-sm hover:bg-white/10 transition-all">취소</button>
+              <button onClick={() => { handleDeleteGiftHistory(giftDeleteConfirm.ids); setGiftDeleteConfirm(null); }} className="flex-1 py-4 bg-rose-600/80 border border-rose-500/50 rounded-2xl text-white font-black text-sm hover:bg-rose-500 transition-all">삭제</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 신고 접수 모달 */}
+      {reportModalOpen && (
+        <div className="fixed inset-0 z-[9500] flex items-center justify-center px-4" onClick={() => setReportModalOpen(false)}>
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" />
+          <div className="relative glass w-full max-w-md rounded-[2.5rem] border border-rose-500/20 shadow-[0_0_60px_rgba(239,68,68,0.1)] overflow-hidden" onClick={e => e.stopPropagation()}>
+            {/* 헤더 */}
+            <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-white/5">
+              <h3 className="text-sm font-black text-white tracking-wider">🚨 신고 접수</h3>
+              <button onClick={() => setReportModalOpen(false)} className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-colors text-sm">✕</button>
+            </div>
+            {/* 폼 */}
+            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              {/* 피신고인 정보 */}
+              <div className="space-y-2">
+                <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">피신고인 정보</p>
+                <div className="flex gap-2">
+                  <div className="flex-1 space-y-1">
+                    <p className="text-[9px] text-slate-600 font-bold pl-1">닉네임 <span className="text-slate-700">(선택)</span></p>
+                    <input value={reportForm.targetNickname} onChange={e => setReportForm(p => ({ ...p, targetNickname: e.target.value }))}
+                      placeholder="상대방 닉네임" maxLength={20}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-rose-500/50 transition-colors" />
+                  </div>
+                  <div className="w-32 space-y-1">
+                    <p className="text-[9px] text-rose-400 font-bold pl-1">*필수</p>
+                    <input value={reportForm.targetTag} onChange={e => setReportForm(p => ({ ...p, targetTag: e.target.value }))}
+                      placeholder="상대방 @아이디" maxLength={8}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-rose-500/50 transition-colors font-mono" />
+                  </div>
+                </div>
+                {reportForm.targetTag && reportForm.targetTag.replace(/^@/, '').length !== 7 && (
+                  <p className="text-[10px] text-rose-400/70">아이디는 @ 포함 8자 (또는 @ 없이 7자)로 입력해 주세요.</p>
+                )}
+              </div>
+              {/* 신고 사유 */}
+              <div className="space-y-2">
+                <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">신고 사유 <span className="text-rose-400">*필수</span></p>
+                <div className="grid grid-cols-3 gap-2">
+                  {REPORT_REASONS.map(r => (
+                    <button key={r} onClick={() => setReportForm(p => ({ ...p, reason: r }))}
+                      className={`py-2 px-2 rounded-xl text-[10px] font-black border transition-all ${reportForm.reason === r ? 'bg-rose-500/20 border-rose-500/50 text-rose-300' : 'border-white/5 text-slate-500 hover:border-white/20 hover:text-slate-400'}`}>
+                      {r}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {/* 신고 내용 */}
+              <textarea value={reportForm.content} onChange={e => setReportForm(p => ({ ...p, content: e.target.value }))} maxLength={500}
+                placeholder="신고 내용을 상세히 작성해 주세요..." rows={4}
+                className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-sm text-white placeholder-slate-600 resize-none focus:outline-none focus:border-rose-500/50 transition-colors" />
+              {/* 이미지 첨부 */}
+              <div className="space-y-2">
+                {reportImagePreviews.length > 0 && (
+                  <div className="flex gap-2 flex-wrap">
+                    {reportImagePreviews.map((url, idx) => (
+                      <div key={idx} className="relative w-20 h-20 rounded-xl overflow-hidden border border-white/10">
+                        <img src={url} alt="" className="w-full h-full object-cover" />
+                        <button onClick={() => handleRemoveImage(idx)}
+                          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 flex items-center justify-center text-white text-[10px] hover:bg-rose-500/80 transition-colors">
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <label className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] font-black transition-colors cursor-pointer ${reportImages.length >= 3 ? 'border-white/5 text-slate-700 cursor-not-allowed' : 'border-white/10 text-slate-500 hover:border-white/20 hover:text-slate-400'}`}>
+                    <span>📎</span>
+                    <span>이미지 첨부 {reportImages.length > 0 ? `(${reportImages.length}/3)` : '(최대 3장)'}</span>
+                    <input type="file" accept="image/*" multiple className="hidden" disabled={reportImages.length >= 3} onChange={handleImageSelect} />
+                  </label>
+                  <span className="text-[10px] text-slate-600">{reportForm.content.length}/500</span>
+                </div>
+              </div>
+              {/* 접수 버튼 */}
+              <button onClick={handleSubmitReport}
+                disabled={!reportForm.reason || !reportForm.content.trim() || !reportForm.targetTag.trim() || reportForm.targetTag.replace(/^@/, '').length !== 7 || isSubmittingReport}
+                className="w-full py-3 bg-rose-500/20 border border-rose-500/30 rounded-2xl text-rose-300 text-[11px] font-black disabled:opacity-30 hover:bg-rose-500/30 transition-all">
+                {isSubmittingReport ? '업로드 및 접수 중...' : '신고 접수'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="relative z-10 border-b border-white/5 px-8 py-6 flex justify-between items-center shrink-0">
         <div className="absolute inset-0 bg-white/[0.02] backdrop-blur-3xl -z-10 pointer-events-none" />
         <div className="flex items-center space-x-3 sm:space-x-6">
@@ -380,7 +763,7 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
             <h2 className="text-base sm:text-xl font-mystic font-black text-white tracking-widest leading-none uppercase">Private Sanctum</h2>
             <p className="text-[9px] text-indigo-400 font-black uppercase tracking-[0.4em] mt-0.5 sm:mt-1.5 inline-flex items-center gap-1.5">
               {orb.nickname || profile.name} 님의 전용 영역
-              {(orb.mailbox?.some(m => !m.isRead) || (isAdmin && hasNewReports)) && (
+              {(orb.mailbox?.some((m: MailMessage) => !m.isRead) || hasReplyNotif || (isAdmin && (hasNewReports || hasNewInquiries))) && (
                 <span className="inline-block w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
               )}
             </p>
@@ -391,7 +774,12 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
               <p className="hidden sm:block text-[9px] text-slate-500 font-black uppercase">Resonance Level</p>
               <p className="text-xs font-normal sm:text-sm sm:font-mystic sm:font-black text-white/80 sm:text-white">LV.{orb.level}</p>
            </div>
-           <OrbVisual level={orb.level} className="w-10 h-10 border border-white/10 shadow-lg shadow-indigo-500/10" overlayAnimation={(ORB_DECORATIONS.find(d => d.id === orb.activeDecorationId) || ORB_DECORATIONS[0]).overlayAnimation} />
+           <div className="relative">
+             <OrbVisual level={orb.level} className="w-10 h-10 border border-white/10 shadow-lg shadow-indigo-500/10" overlayAnimation={(ORB_DECORATIONS.find(d => d.id === orb.activeDecorationId) || ORB_DECORATIONS[0]).overlayAnimation} />
+             {(orb.mailbox?.some((m: MailMessage) => !m.isRead) || hasReplyNotif || (isAdmin && (hasNewReports || hasNewInquiries))) && (
+               <span className="absolute top-0 right-0 w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+             )}
+           </div>
         </div>
       </header>
 
@@ -413,12 +801,14 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
            </button>
 
            {(() => {
-             const hasSocialBadge = orb.mailbox?.some(m => !m.isRead) || (isAdmin && hasNewReports);
+             const hasSocialBadge = isAdmin
+               ? (hasNewReports || hasNewInquiries)
+               : (orb.mailbox?.some((m: MailMessage) => !m.isRead) || hasReplyNotif);
              return [
                { id: 'identity', label: 'Identity', sub: '정체성 및 기록', icon: '🆔' },
                { id: 'treasury', label: 'Inventory', sub: '개인 인벤토리', icon: '💎' },
                { id: 'archives', label: 'Archives', sub: '리포트 서고', icon: '📄' },
-               { id: 'social', label: isAdmin ? '문의 및 신고' : 'Social', sub: isAdmin ? '신고·문의 관리' : '선물 및 편지함', icon: isAdmin ? '🚨' : '📧' },
+               { id: 'social', label: isAdmin ? '문의 및 신고' : '신고 및 문의', sub: isAdmin ? '신고·문의 관리' : '신고·문의 내역', icon: isAdmin ? '🚨' : '📋' },
                { id: 'sanctum', label: 'Sanctum', sub: '개인 성소 꾸미기', icon: '🏛️' },
              ].map(tab => (
                <button
@@ -721,9 +1111,9 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                           <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest">나디르 (Nadir) — 충전 화폐</p>
                         </div>
                         <div className="p-5 space-y-2 text-[12px] text-slate-300 leading-relaxed">
-                          <p>• 현금으로 직접 충전하는 기본 화폐입니다.</p>
-                          <p>• 봉헌 제단에서 사용 시 확률에 따라 <span className="text-amber-400 font-bold">최대 10배 루멘</span>으로 전환됩니다.</p>
-                          <p>• 디지털 재화 특성상 사용함으로써 상품 가치가 훼손되므로 <span className="text-rose-400 font-bold">취소 및 환불이 불가</span>합니다.</p>
+                          <p className="flex gap-1.5"><span className="shrink-0">•</span><span>현금으로 직접 충전하는 기본 화폐입니다.</span></p>
+                          <p className="flex gap-1.5"><span className="shrink-0">•</span><span>봉헌 제단에서 사용 시 확률에 따라 <span className="text-amber-400 font-bold">최대 10배 루멘</span>으로 전환됩니다.</span></p>
+                          <p className="flex gap-1.5"><span className="shrink-0">•</span><span>디지털 재화 특성상 사용함으로써 상품 가치가 훼손되므로 <span className="text-rose-400 font-bold">취소 및 환불이 불가</span>합니다.</span></p>
                         </div>
                       </div>
                       {/* 루멘 */}
@@ -733,10 +1123,10 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                           <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">루멘 (Lumen) — 활동 화폐</p>
                         </div>
                         <div className="p-5 space-y-2 text-[12px] text-slate-300 leading-relaxed">
-                          <p>• 봉헌·출석·활동을 통해 획득하는 앱 내 화폐입니다.</p>
-                          <p>• 천기누설·천명수·지성분석 등 <span className="text-indigo-400 font-bold">모든 콘텐츠를 루멘으로 이용</span>합니다.</p>
-                          <p>• 나디르·현금으로 역환전 불가, <span className="text-rose-400 font-bold">환불 불가</span>합니다.</p>
-                          <p>• 회원 탈퇴 시 잔여 루멘은 소멸됩니다.</p>
+                          <p className="flex gap-1.5"><span className="shrink-0">•</span><span>봉헌·출석·활동을 통해 획득하는 앱 내 화폐입니다.</span></p>
+                          <p className="flex gap-1.5"><span className="shrink-0">•</span><span>천기누설·천명수·지성분석 등 <span className="text-indigo-400 font-bold">모든 콘텐츠를 루멘으로 이용</span>합니다.</span></p>
+                          <p className="flex gap-1.5"><span className="shrink-0">•</span><span>나디르·현금으로 역환전 불가, <span className="text-rose-400 font-bold">환불 불가</span>합니다.</span></p>
+                          <p className="flex gap-1.5"><span className="shrink-0">•</span><span>회원 탈퇴 시 잔여 루멘은 소멸됩니다.</span></p>
                         </div>
                       </div>
                       {/* 루멘 획득 방법 */}
@@ -834,63 +1224,122 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
 
               {activeTab === 'social' && (
                 <div className="space-y-10 animate-in slide-in-from-right-4 duration-500">
-                   <section className="space-y-6">
-                      <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>📧</span><span>신비의 편지함</span></h4>
-                      <div className="space-y-3">
-                         {orb.mailbox && orb.mailbox.length > 0 ? (
-                           orb.mailbox.map(mail => (
-                             <div key={mail.id} className={`p-6 rounded-2xl border transition-all ${mail.isRead ? 'bg-white/5 border-white/5 opacity-50' : 'bg-indigo-500/10 border-indigo-500/30'}`}>
-                                <div className="flex justify-between items-start mb-2">
-                                   <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-1.5">
-                                     {!mail.isRead && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0" />}
-                                     From: {mail.sender}
-                                   </p>
-                                   <span className="text-[9px] text-slate-600">{new Date(mail.timestamp).toLocaleDateString()}</span>
-                                </div>
-                                <h5 className="text-sm font-black text-white mb-1">{mail.title}</h5>
-                                <p className="text-xs text-slate-400 leading-relaxed">{mail.content}</p>
+                   {/* ── 신비의 편지함 ── */}
+                   <section className="space-y-4">
+                      <button onClick={handleOpenMailbox} className="w-full flex items-center justify-between group">
+                        <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>📧</span><span>신비의 편지함</span>{orb.mailbox && orb.mailbox.filter(m => !m.isRead).length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />}</h4>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`text-slate-600 transition-transform duration-200 ${mailboxOpen ? '' : '-rotate-90'}`}><path d="M6 9l6 6 6-6"/></svg>
+                      </button>
+                      {mailboxOpen && (
+                        <div className="space-y-3">
+                           {orb.mailbox && orb.mailbox.length > 0 ? (
+                             orb.mailbox.map(mail => (
+                               <div key={mail.id} className={`p-6 rounded-2xl border transition-all ${mail.isRead ? 'bg-white/5 border-white/5 opacity-50' : 'bg-indigo-500/10 border-indigo-500/30'}`}>
+                                  <div className="flex justify-between items-start mb-2">
+                                     <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-1.5">
+                                       {!mail.isRead && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0" />}
+                                       From: {mail.sender}
+                                     </p>
+                                     <span className="text-[9px] text-slate-600">{new Date(mail.timestamp).toLocaleDateString()}</span>
+                                  </div>
+                                  <h5 className="text-sm font-black text-white mb-1">{mail.title}</h5>
+                                  <p className="text-xs text-slate-400 leading-relaxed">{mail.content}</p>
+                               </div>
+                             ))
+                           ) : (
+                             <div className="glass p-10 rounded-[2.5rem] border border-dashed border-white/10 text-center">
+                                <p className="text-[10px] text-slate-600 font-black uppercase tracking-widest">평온합니다. 새로운 편지가 없습니다.</p>
                              </div>
-                           ))
-                         ) : (
-                           <div className="glass p-10 rounded-[2.5rem] border border-dashed border-white/10 text-center">
-                              <p className="text-[10px] text-slate-600 font-black uppercase tracking-widest">평온합니다. 새로운 편지가 없습니다.</p>
-                           </div>
-                         )}
-                      </div>
-                   </section>
-                   <section className="space-y-6">
-                      <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>🎁</span><span>루멘 전수 내역</span></h4>
-                      <div className="glass rounded-[2rem] border border-white/5 overflow-hidden">
-                         {orb.giftHistory && orb.giftHistory.length > 0 ? (
-                            <div className="divide-y divide-white/5">
-                               {orb.giftHistory.map(g => (
-                                 <div key={g.id} className="p-5 flex justify-between items-center hover:bg-white/5 transition-all">
-                                    <div className="flex items-center space-x-4">
-                                       <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm ${g.type === 'received' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
-                                          {g.type === 'received' ? '↓' : '↑'}
-                                       </div>
-                                       <div>
-                                          <p className="text-[10px] font-black text-slate-500 uppercase">{g.type === 'received' ? 'From' : 'To'}: {g.targetName}</p>
-                                          <p className="text-[9px] text-slate-600">{new Date(g.timestamp).toLocaleString()}</p>
-                                       </div>
-                                    </div>
-                                    <p className={`text-sm font-black ${g.type === 'received' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                       {g.type === 'received' ? '+' : '-'}{g.amount.toLocaleString()} L
-                                    </p>
-                                 </div>
-                               ))}
-                            </div>
-                         ) : (
-                           <div className="p-10 text-center text-slate-600 text-[10px] font-black uppercase tracking-widest">No Gift History</div>
-                         )}
-                      </div>
+                           )}
+                        </div>
+                      )}
                    </section>
 
-                   <section className="space-y-6">
-                      <div className="flex flex-col space-y-1">
-                        <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>🗂️</span><span>대화방 갈무리</span></h4>
-                        <p className="text-[10px] text-slate-600 font-medium pl-7">목록을 길게 눌러 삭제할 수 있습니다.</p>
+                   {/* ── 루멘 전수 내역 ── */}
+                   <section className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <button onClick={() => { setGiftOpen(v => !v); if (giftEditMode) { setGiftEditMode(false); setSelectedGiftIds(new Set()); } }} className="flex-1 text-left">
+                          <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>🎁</span><span>루멘 전수 내역</span></h4>
+                        </button>
+                        <div className="flex items-center gap-[20px] shrink-0">
+                          {giftOpen && orb.giftHistory && orb.giftHistory.length > 0 && (
+                            giftEditMode ? (
+                              <button onClick={() => { setGiftEditMode(false); setSelectedGiftIds(new Set()); }} className="text-[10px] font-black text-slate-500 hover:text-white transition-colors">취소</button>
+                            ) : (
+                              <button onClick={() => setGiftEditMode(true)} className="text-[10px] font-black text-slate-500 hover:text-white transition-colors">편집</button>
+                            )
+                          )}
+                          <button onClick={() => { setGiftOpen(v => !v); if (giftEditMode) { setGiftEditMode(false); setSelectedGiftIds(new Set()); } }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`text-slate-600 transition-transform duration-200 ${giftOpen ? '' : '-rotate-90'}`}><path d="M6 9l6 6 6-6"/></svg>
+                          </button>
+                        </div>
                       </div>
+                      {giftOpen && (
+                        <>
+                          <div className="glass rounded-[2rem] border border-white/5 overflow-hidden">
+                             {orb.giftHistory && orb.giftHistory.length > 0 ? (
+                                <div className="divide-y divide-white/5">
+                                   {orb.giftHistory.map(g => (
+                                     <div key={g.id} className={`p-5 flex items-center gap-3 transition-all ${giftEditMode && selectedGiftIds.has(g.id) ? 'bg-rose-500/10' : 'hover:bg-white/5'}`}>
+                                        {giftEditMode && (
+                                          <button onClick={() => toggleGiftSelect(g.id)} className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${selectedGiftIds.has(g.id) ? 'bg-rose-500 border-rose-500' : 'border-slate-600'}`}>
+                                            {selectedGiftIds.has(g.id) && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                                          </button>
+                                        )}
+                                        <div className="flex items-center space-x-4 flex-1 min-w-0" onClick={() => giftEditMode && toggleGiftSelect(g.id)}>
+                                           <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm shrink-0 ${g.type === 'received' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
+                                              {g.type === 'received' ? '↓' : '↑'}
+                                           </div>
+                                           <div className="min-w-0">
+                                              <p className="text-[10px] font-black text-slate-500 uppercase">{g.type === 'received' ? 'From' : 'To'}: {g.targetName}</p>
+                                              <p className="text-[9px] text-slate-600">{new Date(g.timestamp).toLocaleString()}</p>
+                                           </div>
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                           <p className={`text-sm font-black ${g.type === 'received' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                              {g.type === 'received' ? '+' : '-'}{g.amount.toLocaleString()} L
+                                           </p>
+                                           {!giftEditMode && (
+                                             <button onClick={() => setGiftDeleteConfirm({ ids: [g.id], label: '이 항목을 삭제하시겠습니까?' })} className="w-7 h-7 rounded-lg bg-rose-500/10 hover:bg-rose-500/30 flex items-center justify-center text-rose-400 transition-colors">
+                                               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M9 6V4h6v2"/></svg>
+                                             </button>
+                                           )}
+                                        </div>
+                                     </div>
+                                   ))}
+                                </div>
+                             ) : (
+                               <div className="p-10 text-center text-slate-600 text-[10px] font-black uppercase tracking-widest">No Gift History</div>
+                             )}
+                          </div>
+                          {giftEditMode && (
+                            <div className="flex gap-2">
+                              <button onClick={() => setSelectedGiftIds(selectedGiftIds.size === (orb.giftHistory?.length ?? 0) ? new Set() : new Set((orb.giftHistory || []).map(g => g.id)))} className="flex-1 py-2.5 rounded-2xl bg-white/5 text-[11px] font-black text-slate-400 hover:bg-white/10 transition-colors">
+                                {selectedGiftIds.size === (orb.giftHistory?.length ?? 0) ? '전체 해제' : '전체 선택'}
+                              </button>
+                              <button onClick={() => setGiftDeleteConfirm({ ids: Array.from(selectedGiftIds), label: `선택한 ${selectedGiftIds.size}개 항목을 삭제하시겠습니까?` })} disabled={selectedGiftIds.size === 0} className="flex-1 py-2.5 rounded-2xl bg-rose-600/80 hover:bg-rose-500 disabled:opacity-30 text-[11px] font-black text-white transition-colors">
+                                선택 삭제 {selectedGiftIds.size > 0 && `(${selectedGiftIds.size})`}
+                              </button>
+                              <button onClick={() => setGiftDeleteConfirm({ ids: (orb.giftHistory || []).map(g => g.id), label: '전체 내역을 삭제하시겠습니까?' })} className="flex-1 py-2.5 rounded-2xl bg-rose-900/60 hover:bg-rose-800 text-[11px] font-black text-rose-300 transition-colors">
+                                전체 삭제
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      )}
+                   </section>
+
+                   {/* ── 대화방 갈무리 ── */}
+                   <section className="space-y-4">
+                      <button onClick={() => setCapturesOpen(v => !v)} className="w-full flex items-center justify-between">
+                        <div className="flex flex-col space-y-1 text-left">
+                          <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>🗂️</span><span>대화방 갈무리</span></h4>
+                          {capturesOpen && <p className="text-[10px] text-slate-600 font-medium pl-7">목록을 길게 눌러 삭제할 수 있습니다.</p>}
+                        </div>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`text-slate-600 shrink-0 transition-transform duration-200 ${capturesOpen ? '' : '-rotate-90'}`}><path d="M6 9l6 6 6-6"/></svg>
+                      </button>
+                      {capturesOpen && (
+                      <div>
                       {chatCaptures.length > 0 ? (
                         <div className="space-y-3">
                           {chatCaptures.map(cap => {
@@ -1013,13 +1462,145 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                           <p className="text-[10px] text-slate-600 font-black uppercase tracking-widest">저장된 갈무리가 없습니다.</p>
                         </div>
                       )}
+                      </div>
+                      )}
                    </section>
+
+                   {/* ── 비관리자: 신고하기 ── */}
+                   {!isAdmin && (
+                     <section className="space-y-4">
+                       <div className="flex items-center justify-between">
+                         <button onClick={handleOpenReportSection} className="flex-1 text-left">
+                           <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3">
+                             <span>🚨</span><span>신고하기</span>
+                             {myReports.some(r => r.adminReply && !r.isReplyRead) && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />}
+                           </h4>
+                         </button>
+                         <div className="flex items-center gap-[25px] shrink-0">
+                           {reportSectionOpen && (
+                             <button onClick={() => setReportModalOpen(true)} className="text-[10px] font-black text-rose-400 hover:text-rose-300 transition-colors">신고하기</button>
+                           )}
+                           <button onClick={handleOpenReportSection}>
+                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`text-slate-600 transition-transform duration-200 ${reportSectionOpen ? '' : '-rotate-90'}`}><path d="M6 9l6 6 6-6"/></svg>
+                           </button>
+                         </div>
+                       </div>
+                       {reportSectionOpen && (
+                         <div className="glass rounded-[1.5rem] border border-white/5 overflow-hidden">
+                           {myReports.length > 0 ? myReports.map((r, idx) => {
+                             const isExpanded = expandedMyReport === r.id;
+                             const dateStr = r.reportedAt ? new Date(r.reportedAt as number).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+                             return (
+                               <div key={r.id} className={idx > 0 ? 'border-t border-white/5' : ''}>
+                                 {/* 요약 행 */}
+                                 <button onClick={() => setExpandedMyReport(isExpanded ? null : r.id)} className="w-full px-5 py-4 flex items-center gap-3 hover:bg-white/[0.03] transition-colors text-left">
+                                   <div className="flex-1 min-w-0 space-y-0.5">
+                                     <div className="flex items-center gap-2">
+                                       <span className="text-[10px] font-black text-slate-400">{r.reason}</span>
+                                       {r.adminReply && !r.isReplyRead && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0" />}
+                                     </div>
+                                     <p className="text-[10px] text-slate-600 font-mono truncate">
+                                       {r.targetTag ? `@${r.targetTag}` : ''}
+                                       {dateStr && <span className="text-slate-700 non-mono font-sans ml-2">{dateStr}</span>}
+                                     </p>
+                                   </div>
+                                   <span className={`text-[9px] font-black px-2 py-1 rounded-lg shrink-0 ${r.status === 'pending' ? 'bg-slate-500/20 text-slate-500' : r.status === 'reviewed' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                                     {r.status === 'pending' ? '검토 대기' : r.status === 'reviewed' ? '검토 중' : '처리 완료'}
+                                   </span>
+                                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`text-slate-600 shrink-0 transition-transform duration-200 ${isExpanded ? '' : '-rotate-90'}`}><path d="M6 9l6 6 6-6"/></svg>
+                                 </button>
+                                 {/* 상세 펼침 */}
+                                 {isExpanded && (
+                                   <div className="px-5 pb-5 space-y-3 border-t border-white/5">
+                                     {r.content && <p className="text-[11px] text-slate-400 leading-relaxed pt-3 whitespace-pre-wrap">{r.content}</p>}
+                                     {r.imageUrls && r.imageUrls.length > 0 && (
+                                       <div className="flex gap-2 flex-wrap">
+                                         {r.imageUrls.map((url, i) => (
+                                           <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="w-16 h-16 rounded-xl overflow-hidden border border-white/10 block">
+                                             <img src={url} alt="" className="w-full h-full object-cover" />
+                                           </a>
+                                         ))}
+                                       </div>
+                                     )}
+                                     {r.adminReply && (
+                                       <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-3 space-y-1">
+                                         <p className="text-[10px] text-indigo-400 font-black">관리자 답변</p>
+                                         <p className="text-xs text-slate-300 leading-relaxed">{r.adminReply}</p>
+                                       </div>
+                                     )}
+                                   </div>
+                                 )}
+                               </div>
+                             );
+                           }) : (
+                             <p className="text-center text-slate-600 text-[10px] font-black uppercase tracking-widest py-6">접수된 신고가 없습니다.</p>
+                           )}
+                         </div>
+                       )}
+                     </section>
+                   )}
+
+                   {/* ── 비관리자: 문의하기 ── */}
+                   {!isAdmin && (
+                     <section className="space-y-4">
+                       <button onClick={handleOpenInquirySection} className="w-full flex items-center justify-between group">
+                         <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3">
+                           <span>📩</span><span>문의하기</span>
+                           {myInquiries.some(i => i.adminReply && !i.isReplyRead) && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />}
+                         </h4>
+                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`text-slate-600 transition-transform duration-200 ${inquirySectionOpen ? '' : '-rotate-90'}`}><path d="M6 9l6 6 6-6"/></svg>
+                       </button>
+                       {inquirySectionOpen && (
+                         <div className="space-y-4">
+                           {/* 문의 폼 */}
+                           <div className="glass p-5 rounded-[2rem] border border-white/5 space-y-4">
+                             <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">문의 내용 작성</p>
+                             <textarea value={inquiryContent} onChange={e => setInquiryContent(e.target.value)} maxLength={500}
+                               placeholder="문의하실 내용을 작성해 주세요..." rows={5}
+                               className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-sm text-white placeholder-slate-600 resize-none focus:outline-none focus:border-indigo-500/50 transition-colors" />
+                             <div className="flex items-center justify-between">
+                               <span className="text-[10px] text-slate-600">{inquiryContent.length}/500</span>
+                               <button onClick={handleSubmitInquiry} disabled={!inquiryContent.trim() || isSubmittingInquiry}
+                                 className="px-6 py-2.5 bg-indigo-500/20 border border-indigo-500/30 rounded-2xl text-indigo-300 text-[11px] font-black disabled:opacity-30 hover:bg-indigo-500/30 transition-all">
+                                 {isSubmittingInquiry ? '접수 중...' : '문의 접수'}
+                               </button>
+                             </div>
+                           </div>
+                           {/* 내 문의 내역 */}
+                           {myInquiries.length > 0 && (
+                             <div className="space-y-3">
+                               <p className="text-[10px] text-slate-600 font-black uppercase tracking-widest">접수 내역</p>
+                               {myInquiries.map(i => (
+                                 <div key={i.id} className="glass p-5 rounded-[1.5rem] border border-white/5 space-y-3">
+                                   <div className="flex items-center justify-between gap-2">
+                                     <p className="text-[11px] text-slate-400 leading-relaxed line-clamp-2 flex-1">{i.content}</p>
+                                     <span className={`text-[9px] font-black px-2 py-1 rounded-lg shrink-0 ${i.status === 'pending' ? 'bg-slate-500/20 text-slate-500' : 'bg-indigo-500/20 text-indigo-400'}`}>
+                                       {i.status === 'pending' ? '검토 대기' : '답변 완료'}
+                                     </span>
+                                   </div>
+                                   {i.adminReply && (
+                                     <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-3 space-y-1">
+                                       <p className="text-[10px] text-indigo-400 font-black">관리자 답변</p>
+                                       <p className="text-xs text-slate-300 leading-relaxed">{i.adminReply}</p>
+                                     </div>
+                                   )}
+                                 </div>
+                               ))}
+                             </div>
+                           )}
+                         </div>
+                       )}
+                     </section>
+                   )}
 
                    {/* 관리자 전용: 신고 접수 목록 */}
                    {isAdmin && (
                      <section className="space-y-4">
-                       <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>🚨</span><span>신고 접수 목록</span></h4>
-                       {reports.length > 0 ? (
+                       <button onClick={handleOpenReports} className="w-full flex items-center justify-between">
+                         <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>🚨</span><span>신고 접수 목록</span>{reports.some((r: Report) => !r.isReadByAdmin) && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />}</h4>
+                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`text-slate-600 transition-transform duration-200 ${reportsOpen ? '' : '-rotate-90'}`}><path d="M6 9l6 6 6-6"/></svg>
+                       </button>
+                       {reportsOpen && (reports.length > 0 ? (
                          <div className="space-y-3">
                            {reports.map(rpt => {
                              const isExpanded = expandedReport === rpt.id;
@@ -1098,6 +1679,24 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                                          className="px-4 py-2 bg-slate-500/20 border border-slate-500/30 text-slate-400 text-[10px] font-black rounded-xl hover:bg-rose-500/20 hover:border-rose-500/30 hover:text-rose-400 transition-all"
                                        >🔓 삭제방지 해제</button>
                                      </div>
+                                     {/* 관리자 답변 입력 */}
+                                     <div className="px-5 pb-4 space-y-2 border-t border-white/5 pt-3">
+                                       {rpt.adminReply && (
+                                         <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-3 space-y-1 mb-2">
+                                           <p className="text-[10px] text-indigo-400 font-black">전송한 답변</p>
+                                           <p className="text-xs text-slate-300">{rpt.adminReply}</p>
+                                         </div>
+                                       )}
+                                       <div className="flex gap-2">
+                                         <textarea value={replyInputs[rpt.id] || ''} onChange={e => setReplyInputs(p => ({ ...p, [rpt.id]: e.target.value }))}
+                                           placeholder="신고자에게 답변 전송..." rows={2}
+                                           className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 resize-none focus:outline-none focus:border-indigo-500/50 transition-colors" />
+                                         <button onClick={() => handleSendReply('report', rpt.id)}
+                                           className="px-4 bg-indigo-500/20 border border-indigo-500/30 rounded-xl text-indigo-300 text-[10px] font-black hover:bg-indigo-500/30 transition-all shrink-0">
+                                           전송
+                                         </button>
+                                       </div>
+                                     </div>
                                    </div>
                                  )}
                                </div>
@@ -1108,17 +1707,64 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                          <div className="glass p-10 rounded-[2.5rem] border border-dashed border-white/10 text-center">
                            <p className="text-[10px] text-slate-600 font-black uppercase tracking-widest">접수된 신고가 없습니다.</p>
                          </div>
-                       )}
+                       ))}
                      </section>
                    )}
 
                    {/* 관리자 전용: 문의 접수 목록 */}
                    {isAdmin && (
                      <section className="space-y-4">
-                       <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3"><span>📩</span><span>문의 접수 목록</span></h4>
-                       <div className="glass p-10 rounded-[2.5rem] border border-dashed border-white/10 text-center">
-                         <p className="text-[10px] text-slate-600 font-black uppercase tracking-widest">문의 기능 준비 중</p>
-                       </div>
+                       <button onClick={handleOpenInquiries} className="w-full flex items-center justify-between">
+                         <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center space-x-3">
+                           <span>📩</span><span>문의 접수 목록</span>
+                           {inquiries.some((i: Inquiry) => !i.isReadByAdmin) && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />}
+                         </h4>
+                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`text-slate-600 transition-transform duration-200 ${inquiriesOpen ? '' : '-rotate-90'}`}><path d="M6 9l6 6 6-6"/></svg>
+                       </button>
+                       {inquiriesOpen && (inquiries.length > 0 ? (
+                         <div className="space-y-3">
+                           {inquiries.map((inq: Inquiry) => (
+                             <div key={inq.id} className="glass rounded-[2rem] border border-white/5 overflow-hidden">
+                               <button onClick={() => setExpandedInquiry(v => v === inq.id ? null : inq.id)} className="w-full p-5 flex items-center justify-between gap-3 text-left">
+                                 <div className="space-y-1 min-w-0 flex-1">
+                                   <p className="text-xs font-black text-slate-300 truncate">{inq.name} <span className="text-slate-600 font-normal">@{inq.tag}</span></p>
+                                   <p className="text-[10px] text-slate-500 line-clamp-1">{inq.content}</p>
+                                 </div>
+                                 <div className="flex items-center gap-2 shrink-0">
+                                   <span className={`text-[9px] font-black px-2 py-1 rounded-lg ${inq.status === 'pending' ? 'bg-slate-500/20 text-slate-500' : 'bg-indigo-500/20 text-indigo-400'}`}>
+                                     {inq.status === 'pending' ? '대기' : '답변 완료'}
+                                   </span>
+                                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`text-slate-600 transition-transform duration-200 ${expandedInquiry === inq.id ? '' : '-rotate-90'}`}><path d="M6 9l6 6 6-6"/></svg>
+                                 </div>
+                               </button>
+                               {expandedInquiry === inq.id && (
+                                 <div className="px-5 pb-5 space-y-3 border-t border-white/5 pt-4">
+                                   <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-wrap">{inq.content}</p>
+                                   {inq.adminReply && (
+                                     <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-3 space-y-1">
+                                       <p className="text-[10px] text-indigo-400 font-black">전송한 답변</p>
+                                       <p className="text-xs text-slate-300 leading-relaxed">{inq.adminReply}</p>
+                                     </div>
+                                   )}
+                                   <div className="flex gap-2 pt-1">
+                                     <textarea value={replyInputs[inq.id] || ''} onChange={e => setReplyInputs(p => ({ ...p, [inq.id]: e.target.value }))}
+                                       placeholder="문의자에게 답변 전송..." rows={3}
+                                       className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 resize-none focus:outline-none focus:border-indigo-500/50 transition-colors" />
+                                     <button onClick={() => handleSendReply('inquiry', inq.id)}
+                                       className="px-4 bg-indigo-500/20 border border-indigo-500/30 rounded-xl text-indigo-300 text-[10px] font-black hover:bg-indigo-500/30 transition-all shrink-0">
+                                       전송
+                                     </button>
+                                   </div>
+                                 </div>
+                               )}
+                             </div>
+                           ))}
+                         </div>
+                       ) : (
+                         <div className="glass p-10 rounded-[2.5rem] border border-dashed border-white/10 text-center">
+                           <p className="text-[10px] text-slate-600 font-black uppercase tracking-widest">접수된 문의가 없습니다.</p>
+                         </div>
+                       ))}
                      </section>
                    )}
                 </div>

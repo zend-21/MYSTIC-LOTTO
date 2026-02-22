@@ -281,6 +281,19 @@ export interface ModelStatus {
   checkedAt: number;
 }
 
+export interface Inquiry {
+  id: string;
+  uid: string;
+  name: string;
+  tag: string;
+  content: string;
+  status: 'pending' | 'answered';
+  isReadByAdmin: boolean;
+  adminReply?: string;
+  isReplyRead?: boolean;
+  createdAt: number;
+}
+
 export const ORB_DECORATIONS: OrbDecoration[] = [
   { id: 'default',  name: '기본 오라',    effectClass: 'animate-pulse', price: 0 },
   { id: 'crimson',  name: '심홍의 기운',  effectClass: '', price: 0, overlayAnimation: 'orb-crimson 7s ease-in-out infinite',    outerAnimation: 'orb-outer-crimson 3s ease-in-out infinite',   color: 'rgba(220,38,38,0.6)' },

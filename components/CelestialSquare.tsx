@@ -53,11 +53,12 @@ interface CelestialSquareProps {
   isAdmin?: boolean;
   lumenReceivedAt?: number;
   lumenSenderName?: string;
+  onOpenSelfProfile?: () => void;
 }
 
 const LIST_PAGE_SIZE = 30;
 
-const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdatePoints, onUpdateFavorites, onBack, onToast, onGrowFromPost, isAdmin, lumenReceivedAt = 0, lumenSenderName = '' }) => {
+const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdatePoints, onUpdateFavorites, onBack, onToast, onGrowFromPost, isAdmin, lumenReceivedAt = 0, lumenSenderName = '', onOpenSelfProfile }) => {
   const [view, setView] = useState<'lounge' | 'chat' | 'board' | 'post-detail' | 'post-edit'>('lounge');
   const [activeRoom, setActiveRoom] = useState<ChatRoom | null>(null);
 
@@ -695,7 +696,9 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
                 )}
              </div>
            )}
-           <OrbVisual level={orb.level} className="w-10 h-10 border border-white/10" overlayAnimation={(ORB_DECORATIONS.find(d => d.id === orb.activeDecorationId) || ORB_DECORATIONS[0]).overlayAnimation} />
+           <button onClick={() => onOpenSelfProfile?.()} className="rounded-full hover:ring-2 hover:ring-indigo-400/60 transition-all">
+             <OrbVisual level={orb.level} className="w-10 h-10 border border-white/10" overlayAnimation={(ORB_DECORATIONS.find(d => d.id === orb.activeDecorationId) || ORB_DECORATIONS[0]).overlayAnimation} />
+           </button>
         </div>
       </header>
 
