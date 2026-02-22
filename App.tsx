@@ -949,10 +949,10 @@ const App: React.FC = () => {
         </>
       )}
       <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-      <div className="border-b border-white/5 px-8 py-4 flex justify-between items-center">
+      <div className="border-b border-white/5 pl-[17px] pr-[22px] py-4 flex justify-between items-center">
         <div className="flex items-center space-x-4">
           <img src="/s_mlotto_logo.png" alt="Mystic" className="w-10 h-10 object-contain drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
-          <div className="flex flex-col"><h2 className="text-lg sm:text-2xl font-mystic font-black text-white tracking-wider leading-none">MYSTIC LOTTO</h2><span className="text-[8px] text-indigo-400 uppercase font-bold tracking-[0.42em] sm:tracking-[0.5em] mt-1 whitespace-nowrap">Lotto Resonance</span></div>
+          <div className="flex flex-col mt-[3px] sm:mt-0"><h2 className="text-lg sm:text-2xl font-mystic font-black text-white tracking-wider leading-none">MYSTIC LOTTO</h2><span className="text-[8px] text-indigo-400 uppercase font-bold tracking-[0.42em] sm:tracking-[0.5em] mt-1 whitespace-nowrap">Lotto Resonance</span></div>
         </div>
         <div className="flex items-center space-x-6 text-right relative translate-x-[10px] sm:translate-x-0">
           <button onClick={() => setView('profile')} className="hover:bg-white/5 p-2 rounded-xl group flex items-center space-x-4">
