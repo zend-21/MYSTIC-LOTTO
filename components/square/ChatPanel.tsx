@@ -8,18 +8,12 @@ import {
   doc, updateDoc, arrayUnion, setDoc, getDoc
 } from 'firebase/firestore';
 import { spendPoints } from '../../services/geminiService';
+import Picker from '@emoji-mart/react';
+import data from '@emoji-mart/data';
 
 const MSG_PAGE_SIZE = 50;
 const MSG_MAX_LENGTH = 300;
 
-// ── 이모지 목록 ──────────────────────────────────────────────────────────────
-const EMOJI_LIST = [
-  '😀','😂','🥰','😍','😎','🤣','😊','😄','😁','🥳',
-  '😤','😅','🤔','💪','🙏','👍','❤️','🔥','✨','💫',
-  '⭐','🌟','🎉','💯','👀','🎁','🌙','☀️','🌈','🎯',
-  '😇','🥺','😋','😛','🤩','😜','🤗','😮','😱','🤯',
-  '🌸','🌺','🍀','🦋','🐉','💎','🔮','🪄','🌊','⚡',
-];
 
 // ── 매크로 타입 ──────────────────────────────────────────────────────────────
 type AutoTrigger = '' | 'i_enter' | 'someone_enters' | 'someone_leaves' | 'gift_lumen' | 'idle_3min' | 'received_lumen';
@@ -114,11 +108,26 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
   const [showMacroModal, setShowMacroModal]   = useState(false);
   const [macroTab, setMacroTab]               = useState<'manual' | 'auto'>('manual');
   const [isMacroEditMode, setIsMacroEditMode] = useState(false);
+  const [macroInstantSend, setMacroInstantSend] = useState(false);
   const [editingSlot, setEditingSlot]         = useState<number | null>(null);
   const [editText, setEditText]               = useState('');
   const [editTrigger, setEditTrigger]         = useState<AutoTrigger>('');
   const [manualMacros, setManualMacros]       = useState<string[]>(() => loadMacros().manual);
   const [autoMacros, setAutoMacros]           = useState<AutoMacro[]>(() => loadMacros().auto);
+
+  // ── 이모지 피커 너비 ──────────────────────────────────────────────────────
+  const pickerContainerRef = useRef<HTMLDivElement>(null);
+  const [pickerPerLine, setPickerPerLine] = useState(9);
+
+  useEffect(() => {
+    if (!showEmojiPicker || !pickerContainerRef.current) return;
+    const el = pickerContainerRef.current;
+    const measure = () => setPickerPerLine(Math.max(6, Math.floor(el.clientWidth / 36)));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [showEmojiPicker]);
 
   // ── refs ─────────────────────────────────────────────────────────────────
   const scrollRef              = useRef<HTMLDivElement>(null);
@@ -370,8 +379,8 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
   };
 
   // ── 메시지 전송 ──────────────────────────────────────────────────────────
-  const sendMessage = async () => {
-    const text = inputMsg.trim();
+  const sendMessage = async (textOverride?: string) => {
+    const text = (textOverride !== undefined ? textOverride : inputMsg).trim();
     if (!text || !auth.currentUser) return;
     const now = Date.now();
     if (mutedUntil > now) {
@@ -409,7 +418,7 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         message: text,
         timestamp: now,
       });
-      setInputMsg('');
+      if (textOverride === undefined) setInputMsg('');
       lastMyMsgTimeRef.current = now;
       resetIdleTimer();
     } catch {
@@ -504,8 +513,13 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
   // ── 수동 매크로 클릭 → 입력창에 삽입 ────────────────────────────────────
   const applyManualMacro = (text: string) => {
     if (!text) return;
-    setInputMsg(prev => prev + text);
-    setShowMacroModal(false);
+    if (macroInstantSend) {
+      setShowMacroModal(false);
+      sendMessage(text);
+    } else {
+      setInputMsg((prev: string) => prev + text);
+      setShowMacroModal(false);
+    }
   };
 
   // ── JSX ──────────────────────────────────────────────────────────────────
@@ -532,7 +546,7 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         )}
 
         {/* 메시지 목록 */}
-        <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-8 space-y-6 custom-scroll">
+        <div ref={scrollRef} className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto p-8 space-y-6 custom-scroll">
           {/* 입장 메시지 (공지 위) */}
           {localEntryMsg && (
             <div className="flex flex-col items-center space-y-1">
@@ -586,16 +600,16 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               </div>
             );
             return (
-              <div key={msg.id} className={`flex items-start space-x-4 ${isMe ? 'flex-row-reverse space-x-reverse' : ''}`}>
+              <div key={msg.id} className={`flex items-start space-x-4 w-full min-w-0 ${isMe ? 'flex-row-reverse space-x-reverse' : ''}`}>
                 {!isMe && (
-                  <div className="relative group cursor-pointer" onClick={() => setShowGiftModal(msg)}>
+                  <div className="relative group cursor-pointer shrink-0" onClick={() => setShowGiftModal(msg)}>
                     <OrbVisual level={msg.userLevel} className="w-10 h-10 border border-white/10" />
                     <div className="absolute -top-1 -right-1 bg-indigo-600 text-[8px] font-black px-1.5 py-0.5 rounded shadow-lg">LV.{msg.userLevel}</div>
                   </div>
                 )}
-                <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[70%]`}>
+                <div className={`flex flex-col min-w-0 max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">{msg.userName}</span>
-                  <div className={`px-5 py-3 rounded-2xl text-sm font-medium ${isMe ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-white/5 border border-white/5 text-slate-200 rounded-tl-none'}`}>
+                  <div className={`px-5 py-3 rounded-2xl text-sm font-medium break-words whitespace-pre-wrap ${isMe ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-white/5 border border-white/5 text-slate-200 rounded-tl-none'}`}>
                     {msg.message}
                   </div>
                 </div>
@@ -604,20 +618,20 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           })}
         </div>
 
-        {/* 이모지 피커 (인라인 — 입력창 위에 슬라이드) */}
+        {/* 이모지 피커 (emoji-mart) */}
         {showEmojiPicker && (
-          <div className="shrink-0 bg-slate-900/95 border-t border-white/10 px-3 py-2">
-            <div className="grid grid-cols-10 gap-0.5">
-              {EMOJI_LIST.map(emoji => (
-                <button
-                  key={emoji}
-                  className="text-xl leading-none p-1.5 hover:bg-white/10 rounded-lg transition-colors"
-                  onClick={() => setInputMsg(prev => prev + emoji)}
-                >
-                  {emoji}
-                </button>
-              ))}
-            </div>
+          <div ref={pickerContainerRef} className="shrink-0 border-t border-white/10">
+            <Picker
+              data={data}
+              onEmojiSelect={(emoji: { native: string }) => setInputMsg((prev: string) => prev + emoji.native)}
+              theme="dark"
+              locale="ko"
+              previewPosition="none"
+              skinTonePosition="none"
+              set="native"
+              width="100%"
+              perLine={pickerPerLine}
+            />
           </div>
         )}
 
@@ -758,7 +772,7 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                       }`}
                     >
                       <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest shrink-0">#{i + 1}</span>
-                      <span className={`text-xs leading-snug truncate ${text ? 'text-slate-200' : 'text-slate-600 italic'}`}>
+                      <span className={`text-xs leading-snug truncate ${text ? 'text-white' : 'text-slate-500 italic'}`}>
                         {text || '빈 슬롯'}
                       </span>
                     </button>
@@ -844,7 +858,32 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               </div>
             )}
 
-            <div className="h-5"></div>
+            {/* 수동 매크로 적용 방식 */}
+            {macroTab === 'manual' && (
+              <div className="px-6 pb-4 pt-1">
+                {isMacroEditMode ? (
+                  <div className="flex items-center gap-5 py-2.5 px-4 bg-white/5 rounded-xl border border-white/10">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="radio" name="macroMode" checked={!macroInstantSend} onChange={() => setMacroInstantSend(false)} className="accent-indigo-500 w-3.5 h-3.5" />
+                      <span className={`text-[11px] font-black ${!macroInstantSend ? 'text-white' : 'text-slate-400'}`}>입력창에 붙여넣기</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="radio" name="macroMode" checked={macroInstantSend} onChange={() => setMacroInstantSend(true)} className="accent-indigo-500 w-3.5 h-3.5" />
+                      <span className={`text-[11px] font-black ${macroInstantSend ? 'text-emerald-300' : 'text-slate-400'}`}>즉시 전송</span>
+                    </label>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 py-1.5 px-3 bg-white/5 rounded-xl">
+                    <span className="text-[9px] text-slate-500 font-black uppercase tracking-widest">매크로 모드</span>
+                    <span className={`text-[11px] font-black ${macroInstantSend ? 'text-emerald-400' : 'text-indigo-400'}`}>
+                      {macroInstantSend ? '⚡ 즉시 전송' : '📋 입력창에 붙여넣기'}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="h-2"></div>
           </div>
         </div>
       )}

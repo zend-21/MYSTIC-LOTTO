@@ -9,7 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@emoji-mart/data": "^1.2.1",
+    "@emoji-mart/react": "^1.1.1",
     "@google/genai": "^1.41.0",
+    "emoji-mart": "^5.6.0",
     "firebase": "^12.9.0",
     "korean-lunar-calendar": "^0.3.6",
     "lottie-web": "5.12.2",

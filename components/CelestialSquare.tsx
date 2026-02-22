@@ -93,6 +93,11 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
   const [editRoomTitle, setEditRoomTitle] = useState('');
   const [editRoomIcon, setEditRoomIcon] = useState('🪐');
 
+  // 안내 표지판 모달 상태
+  const [showNoticeModal, setShowNoticeModal] = useState(false);
+  const [noticeText, setNoticeText] = useState('');
+  const [isSavingNotice, setIsSavingNotice] = useState(false);
+
   // 참여자 목록 선물 모달 상태
   const [giftTarget, setGiftTarget] = useState<{ uid: string; name: string; uniqueTag: string; level: number } | null>(null);
   const [giftAmount, setGiftAmount] = useState('100');
@@ -152,7 +157,7 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
     const q = query(collection(db, "square", "rooms", "list"), orderBy("createdAt", "desc"), limit(LIST_PAGE_SIZE));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const now = Date.now();
-      const THREE_DAYS = 3 * 24 * 60 * 60 * 1000;
+      const THREE_DAYS = 5 * 24 * 60 * 60 * 1000;
       const allRooms = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ChatRoom));
 
       allRooms.forEach(room => {
@@ -255,6 +260,12 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
   const toggleFavorite = (e: React.MouseEvent, roomId: string) => {
     e.stopPropagation();
     const favorites = orb.favoriteRoomIds || [];
+    // 자신이 만든 방은 즐겨찾기 해제 불가
+    const room = [...rooms, ...olderRooms].find(r => r.id === roomId);
+    if (room?.creatorId === auth.currentUser?.uid) {
+      onToast("성주님의 행성입니다.");
+      return;
+    }
     if (favorites.includes(roomId)) {
       onUpdateFavorites(favorites.filter(id => id !== roomId));
       onToast("즐겨찾기가 해제되었습니다.");
@@ -270,6 +281,7 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
 
   const handleCreateRoom = async () => {
     if (!newRoomTitle.trim() || !auth.currentUser) return;
+    if (newRoomTitle.trim().length > 10) { onToast("행성명은 10자 이내로 입력해주세요."); return; }
     if (orb.points < COST_ROOM_CREATE) {
       onToast("방을 개설할 기운(루멘)이 부족합니다.");
       return;
@@ -288,6 +300,11 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
       };
       const docRef = await addDoc(collection(db, "square", "rooms", "list"), roomData);
       await spendPoints(COST_ROOM_CREATE, 'room_create');
+      // 자신이 만든 방은 자동으로 즐겨찾기 (해제 불가)
+      const currentFavs = orb.favoriteRoomIds || [];
+      if (!currentFavs.includes(docRef.id)) {
+        onUpdateFavorites([...currentFavs, docRef.id]);
+      }
       setActiveRoom({ id: docRef.id, ...roomData });
       setView('chat');
       setIsCreatingRoom(false);
@@ -461,10 +478,27 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
     }
   };
 
+  // 안내 표지판 저장
+  const handleSaveNotice = async () => {
+    if (!activeRoom || !auth.currentUser) return;
+    if (noticeText.length > 50) { onToast("50자 이내로 입력해주세요."); return; }
+    setIsSavingNotice(true);
+    try {
+      await updateDoc(doc(db, "square", "rooms", "list", activeRoom.id), { notice: noticeText.trim() });
+      setShowNoticeModal(false);
+      onToast("안내 표지판이 업데이트되었습니다.");
+    } catch {
+      onToast("저장에 실패했습니다.");
+    } finally {
+      setIsSavingNotice(false);
+    }
+  };
+
   // 행성명/아이콘 수정
   const handleEditRoom = async () => {
     if (!activeRoom || !auth.currentUser) return;
     if (!editRoomTitle.trim()) { onToast("행성명을 입력해주세요."); return; }
+    if (editRoomTitle.trim().length > 10) { onToast("행성명은 10자 이내로 입력해주세요."); return; }
     const renameCount = activeRoom.renameCount ?? 0;
     const isAdminRoom = activeRoom.creatorId === SUPER_ADMIN_UID;
     const cost = isAdminRoom ? 0 : (renameCount >= 1 ? 500 : 0);
@@ -575,22 +609,22 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
 
   return (
     <div className="fixed inset-0 z-[5000] bg-[#020617] text-slate-200 flex flex-col animate-dimension-shift">
-      <header className="relative z-[100] border-b border-white/5 px-8 py-6 flex justify-between items-center shrink-0 shadow-2xl">
+      <header className="relative z-[100] border-b border-white/5 pl-[17px] pr-[27px] sm:px-8 py-6 flex justify-between items-center shrink-0 shadow-2xl">
         <div className="absolute inset-0 bg-white/[0.02] backdrop-blur-3xl -z-10 pointer-events-none" />
-        <div className="flex items-center space-x-6">
+        <div className="flex items-center space-x-[14px] sm:space-x-6 min-w-0 flex-1">
           <button
             onClick={() => {
               if (view === 'lounge') onBack();
               else if (view === 'post-detail' || view === 'post-edit') setView('board');
               else setView('lounge');
             }}
-            className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors"
+            className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors shrink-0"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           </button>
-          <div className="flex flex-col">
-            <h2 className="text-base sm:text-xl font-mystic font-black text-white tracking-tight sm:tracking-widest leading-none uppercase whitespace-nowrap">
-              {view === 'lounge' ? 'Celestial Square' : view === 'chat' ? `${activeRoom?.icon ? activeRoom.icon + ' ' : ''}${activeRoom?.title} (${participants.length})` : 'Resonance Board'}
+          <div className="flex flex-col min-w-0">
+            <h2 className="text-base sm:text-xl font-mystic font-black text-white tracking-tight sm:tracking-widest leading-none uppercase truncate">
+              {view === 'lounge' ? 'Celestial Square' : view === 'chat' ? `${activeRoom?.icon ? activeRoom.icon + ' ' : ''}${activeRoom?.title}` : 'Resonance Board'}
             </h2>
             {(view === 'post-detail' || view === 'post-edit') ? (
               <div className="flex items-center space-x-2 mt-1.5">
@@ -601,7 +635,7 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
             ) : (
               <p className="text-[9px] font-bold text-slate-500 mt-1.5 whitespace-nowrap">
                 {view === 'lounge' ? '행성을 탐색하고 여행자들과 공명하세요'
-                 : view === 'chat' ? `${participants.length}명과 공명 중`
+                 : view === 'chat' ? `${participants.length}명 공명 중`
                  : '이야기를 올리고 공명을 나누는 공간'}
               </p>
             )}
@@ -633,6 +667,12 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
                          <button onClick={() => { setEditRoomTitle(activeRoom.title); setEditRoomIcon(activeRoom.icon || '🪐'); setShowEditRoomModal(true); setShowRoomMenu(false); }} className="w-full text-left p-3 rounded-xl hover:bg-white/5 text-[10px] font-bold text-slate-300 transition-colors flex items-center space-x-2">
                            <span>✏️</span>
                            <span>행성명 변경 {activeRoom.creatorId === SUPER_ADMIN_UID ? '(무료)' : (activeRoom.renameCount ?? 0) >= 1 ? '(500L)' : '(1회 무료)'}</span>
+                         </button>
+                       )}
+                       {activeRoom && auth.currentUser && activeRoom.creatorId === auth.currentUser.uid && (
+                         <button onClick={() => { setNoticeText(activeRoom.notice || ''); setShowNoticeModal(true); setShowRoomMenu(false); }} className="w-full text-left p-3 rounded-xl hover:bg-white/5 text-[10px] font-bold text-slate-300 transition-colors flex items-center space-x-2">
+                           <span>📋</span>
+                           <span>안내 표지판 (무료)</span>
                          </button>
                        )}
                        {activeRoom && auth.currentUser && (() => {
@@ -785,11 +825,22 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
                                </div>
                              );
                            })()}
-                           {!isDying && !isOfficial && (
-                             <button onClick={(e) => toggleFavorite(e, room.id)} className={`p-1.5 rounded-lg transition-colors ${isFav ? 'text-yellow-500' : 'text-slate-600 hover:text-white'}`}>
+                           {!isDying && !isOfficial && (() => {
+                            const isOwnRoom = room.creatorId === auth.currentUser?.uid;
+                            if (isOwnRoom) {
+                              return (
+                                <div onClick={(e: React.MouseEvent) => { e.stopPropagation(); onToast("성주님의 행성입니다."); }} className="p-1.5 rounded-lg text-yellow-500 relative cursor-default">
+                                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                                  <span className="absolute -bottom-0.5 -right-0.5 text-[7px] leading-none">🔒</span>
+                                </div>
+                              );
+                            }
+                            return (
+                              <button onClick={(e) => toggleFavorite(e, room.id)} className={`p-1.5 rounded-lg transition-colors ${isFav ? 'text-yellow-500' : 'text-slate-600 hover:text-white'}`}>
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill={isFav ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-                             </button>
-                           )}
+                              </button>
+                            );
+                          })()}
                         </div>
                         <div className="flex items-center gap-1 mb-0.5">
                           <h4 className={`text-sm font-black group-hover:text-white transition-colors truncate ${isDying ? 'text-rose-200' : isOfficial ? 'text-amber-200' : isFav ? 'text-yellow-100' : 'text-slate-300'}`}>{room.title}</h4>
@@ -801,6 +852,11 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
                           )}
                         </div>
                         <p className={`text-[9px] font-bold uppercase tracking-widest truncate ${isOfficial ? 'text-amber-500/70' : 'text-slate-500'}`}>by {room.creatorName}</p>
+                        {room.notice && !isDying && (
+                          <div className="mt-[12px] overflow-hidden px-1 py-0.5">
+                            <span className="notice-marquee text-[9px] text-slate-400/90">{room.notice}</span>
+                          </div>
+                        )}
                         {isDying && <p className="text-[8px] text-rose-500 font-black uppercase mt-1 animate-pulse">Destruction Imminent</p>}
                       </div>
                       <div className="relative z-10 flex justify-between items-center mt-2">
@@ -930,6 +986,9 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
         <div className="fixed inset-0 z-[6000] flex items-center justify-center px-6">
           <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setIsCreatingRoom(false)}></div>
           <div className="relative glass p-10 rounded-[3rem] border border-white/10 w-full max-w-sm text-center animate-in zoom-in-95 duration-300">
+             <button onClick={() => setIsCreatingRoom(false)} className="absolute top-5 right-5 text-slate-500 hover:text-white transition-colors">
+               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+             </button>
              <h3 className="text-2xl font-mystic font-black text-white mb-2 uppercase tracking-widest">Create Planet</h3>
              <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-6 italic">새로운 영구 대화의 장을 탄생시킵니다.</p>
              <div className="space-y-4">
@@ -943,12 +1002,13 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
                 <input
                   type="text"
                   value={newRoomTitle}
-                  onChange={e => setNewRoomTitle(e.target.value)}
+                  onChange={e => { if (e.target.value.length <= 10) setNewRoomTitle(e.target.value); }}
                   onKeyDown={e => e.key === 'Enter' && handleCreateRoom()}
-                  placeholder="행성의 이름을 지어주세요"
+                  placeholder="행성의 이름을 지어주세요 (10자 이내)"
                   className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-white text-center font-bold focus:border-indigo-500 outline-none"
                 />
                 <button onClick={handleCreateRoom} className="w-full py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-sm hover:bg-indigo-500 transition-all">탄생시키기 (1,000 L)</button>
+                <p className="text-[10px] text-slate-600 font-bold text-center leading-relaxed">5일 이상 아무도 행성 출입을 하지 않으면 자동 소멸됩니다.</p>
              </div>
           </div>
         </div>
@@ -1102,15 +1162,51 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
               <input
                 type="text"
                 value={editRoomTitle}
-                onChange={e => setEditRoomTitle(e.target.value)}
+                onChange={e => { if (e.target.value.length <= 10) setEditRoomTitle(e.target.value); }}
                 onKeyDown={e => e.key === 'Enter' && handleEditRoom()}
-                placeholder="새 행성명을 입력하세요"
+                placeholder="새 행성명 (10자 이내)"
                 className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-white text-center font-bold focus:border-indigo-500 outline-none"
               />
               <button onClick={handleEditRoom} className="w-full py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-sm hover:bg-indigo-500 transition-all">
                 변경하기 {activeRoom.creatorId === SUPER_ADMIN_UID ? '(무료)' : (activeRoom.renameCount ?? 0) >= 1 ? '(500 L)' : '(무료)'}
               </button>
               <button onClick={() => setShowEditRoomModal(false)} className="w-full py-3 bg-white/5 text-slate-500 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-white/10">취소</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 안내 표지판 모달 */}
+      {showNoticeModal && activeRoom && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center px-6">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setShowNoticeModal(false)}></div>
+          <div className="relative glass p-10 rounded-[3rem] border border-indigo-500/20 w-full max-w-sm text-center animate-in zoom-in-95 duration-300">
+            <h3 className="text-xl font-mystic font-black text-white mb-1 uppercase tracking-widest">📋 Notice Board</h3>
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-6 italic">방 목록에 표시될 안내 문구를 입력하세요</p>
+            <div className="space-y-3">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={noticeText}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.value.length <= 50) setNoticeText(e.target.value); }}
+                  onKeyDown={(e: React.KeyboardEvent) => e.key === 'Enter' && handleSaveNotice()}
+                  placeholder="예: 2월 27일 AM 10:00 부터 오픈"
+                  className="w-full bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-white text-center text-sm font-bold focus:border-indigo-500 outline-none pr-20"
+                />
+                <span className={`absolute right-9 top-1/2 -translate-y-1/2 text-[10px] font-black ${noticeText.length >= 50 ? 'text-rose-400' : 'text-slate-600'}`}>{noticeText.length}/50</span>
+                {noticeText && (
+                  <button onClick={() => setNoticeText('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white text-[11px] font-black transition-colors">×</button>
+                )}
+              </div>
+              <button onClick={handleSaveNotice} disabled={isSavingNotice} className="w-full py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-sm hover:bg-indigo-500 transition-all disabled:opacity-50">
+                {isSavingNotice ? '저장 중...' : '저장하기 (무료)'}
+              </button>
+              {noticeText.trim() && (
+                <button onClick={() => { setNoticeText(''); handleSaveNotice(); }} className="w-full py-3 bg-rose-500/10 text-rose-400 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-rose-500/20 transition-all">
+                  표지판 제거
+                </button>
+              )}
+              <button onClick={() => setShowNoticeModal(false)} className="w-full py-3 bg-white/5 text-slate-500 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-white/10">취소</button>
             </div>
           </div>
         </div>

@@ -231,6 +231,7 @@ export interface ChatRoom {
   lastEnteredAt?: number; // 마지막 입장 타임스탬프 (3일 미방문 자동 소멸용)
   renameCount?: number; // 행성명/아이콘 변경 횟수 (0 또는 undefined = 무료, 1이상 = 500L)
   isUnderReview?: boolean; // 신고 검토 중 — 삭제 금지 플래그
+  notice?: string; // 안내 표지판 문구 (최대 50자)
 }
 
 export interface BoardComment {
