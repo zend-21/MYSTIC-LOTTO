@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle, us
 import { OrbState, ChatRoom, ChatMessage } from '../../types';
 import { OrbVisual } from '../FortuneOrb';
 import { db, auth } from '../../services/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 import {
   collection, query, onSnapshot, addDoc,
   orderBy, limit, getDocs, startAfter, QueryDocumentSnapshot,
@@ -225,9 +226,9 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     setShowEmojiPicker(false);
     isInitialPartRef.current = true;
     prevParticipantsRef.current = [];
-    partGracePeriodRef.current = Date.now() + 3000; // 입장 후 3초간 기존 참여자 인식 유예
+    partGracePeriodRef.current = Date.now() + 3000;
 
-    // ① 나에게만 보이는 로컬 입장 메시지 (Firestore 미기록)
+    // ① 로컬 입장 메시지 — auth 불필요, 항상 즉시 표시
     const roomLabel = `${activeRoom.icon ? activeRoom.icon + ' ' : ''}${activeRoom.title}`;
     const titleSuffix = activeRoom.title.endsWith('방') ? '' : '방';
     setLocalEntryMsg({
@@ -239,7 +240,9 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       timestamp: entryTs,
     });
 
-    // ② 다른 사용자에게 보이는 Firestore 시스템 입장 메시지
+    resetIdleTimer();
+
+    // ② 다른 사용자에게 보이는 시스템 입장 메시지 — auth 있을 때만 (원래 방식 유지)
     if (auth.currentUser) {
       const displayName = currentDisplayNameRef.current || '익명';
       addDoc(
@@ -249,35 +252,44 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           userName: 'system',
           userLevel: 0,
           message: `${displayName}님이 입장하였습니다.`,
-          timestamp: entryTs + 1, // localEntryMsg보다 1ms 뒤
-          excludeUserId: auth.currentUser.uid, // 입장한 본인에게는 표시 안 함
+          timestamp: entryTs + 1,
+          excludeUserId: auth.currentUser.uid,
         }
       ).catch(() => {});
     }
 
-    // i_enter 자동 매크로 (1.5초 후 — 메시지 구독 안정 후)
-    const enterTimer = setTimeout(() => sendAutoMacro('i_enter'), 1500);
+    let enterTimer: ReturnType<typeof setTimeout> | null = null;
+    let unsubSnapshot: () => void = () => {};
+    let authHandled = false;
 
-    // idle 타이머 시작
-    resetIdleTimer();
+    // ③ auth 준비 후 실행: 메시지 구독 + 자동매크로
+    // 모바일에서 IndexedDB 복원이 늦어도 auth가 오면 즉시 처리
+    const unsubAuth = onAuthStateChanged(auth, user => {
+      if (!user || authHandled) return;
+      authHandled = true;
 
-    // 메시지 실시간 구독
-    const q = query(
-      collection(db, 'square', 'rooms', 'list', activeRoom.id, 'messages'),
-      orderBy('timestamp', 'desc'),
-      limit(MSG_PAGE_SIZE)
-    );
-    const unsub = onSnapshot(q, snap => {
-      const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage)).reverse();
-      setRealtimeMsgs(msgs);
-      setMsgCursor(snap.docs[snap.docs.length - 1] || null);
-      setHasMoreMessages(snap.docs.length === MSG_PAGE_SIZE);
+      // i_enter 자동 매크로 (1.5초 후)
+      enterTimer = setTimeout(() => sendAutoMacro('i_enter'), 1500);
+
+      // 메시지 실시간 구독
+      const q = query(
+        collection(db, 'square', 'rooms', 'list', activeRoom.id, 'messages'),
+        orderBy('timestamp', 'desc'),
+        limit(MSG_PAGE_SIZE)
+      );
+      unsubSnapshot = onSnapshot(q, snap => {
+        const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage)).reverse();
+        setRealtimeMsgs(msgs);
+        setMsgCursor(snap.docs[snap.docs.length - 1] || null);
+        setHasMoreMessages(snap.docs.length === MSG_PAGE_SIZE);
+      }, err => console.error('메시지 구독 오류:', err));
     });
 
     return () => {
-      clearTimeout(enterTimer);
+      unsubAuth();
+      if (enterTimer) clearTimeout(enterTimer);
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-      unsub();
+      unsubSnapshot();
     };
   }, [activeRoom.id, sendAutoMacro, resetIdleTimer]);
 
@@ -314,29 +326,29 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     localStorage.setItem(MACRO_KEY, JSON.stringify({ manual: manualMacros, auto: autoMacros }));
   }, [manualMacros, autoMacros]);
 
-  // ── 마운트 시 Firestore에서 매크로 로드 (localStorage 캐시 위에 덮어씀) ─
+  // ── 마운트 시 Firestore에서 매크로 로드 (auth 준비 후 실행) ─────────────
   useEffect(() => {
-    if (!auth.currentUser) return;
-    let mounted = true;
-    const macroDocRef = doc(db, 'users', auth.currentUser.uid, 'settings', 'macros');
-    getDoc(macroDocRef).then(snap => {
-      if (!mounted || !snap.exists()) return;
-      const data = snap.data();
-      const manual: string[] = Array.isArray(data.manual) ? data.manual : [];
-      const savedAuto: AutoMacro[] = Array.isArray(data.auto) ? data.auto : [];
-      while (manual.length < 7) manual.push('');
-      const auto = FIXED_AUTO_TRIGGERS.map((trigger, i) => ({
-        text: savedAuto[i]?.text || '',
-        trigger,
-      }));
-      const normalized = { manual: manual.slice(0, 7), auto };
-      setManualMacros(normalized.manual);
-      setAutoMacros(normalized.auto);
-      // localStorage도 최신화 (Firestore가 소스 of truth)
-      localStorage.setItem(MACRO_KEY, JSON.stringify(normalized));
-    }).catch(() => {});
-    return () => { mounted = false; };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    const unsubAuth = onAuthStateChanged(auth, user => {
+      if (!user) return;
+      const macroDocRef = doc(db, 'users', user.uid, 'settings', 'macros');
+      getDoc(macroDocRef).then(snap => {
+        if (!snap.exists()) return;
+        const data = snap.data();
+        const manual: string[] = Array.isArray(data.manual) ? data.manual : [];
+        const savedAuto: AutoMacro[] = Array.isArray(data.auto) ? data.auto : [];
+        while (manual.length < 7) manual.push('');
+        const auto = FIXED_AUTO_TRIGGERS.map((trigger, i) => ({
+          text: savedAuto[i]?.text || '',
+          trigger,
+        }));
+        const normalized = { manual: manual.slice(0, 7), auto };
+        setManualMacros(normalized.manual);
+        setAutoMacros(normalized.auto);
+        localStorage.setItem(MACRO_KEY, JSON.stringify(normalized));
+      }).catch(() => {});
+    });
+    return () => unsubAuth();
+  }, []);
 
   // ── 더 불러오기 ──────────────────────────────────────────────────────────
   const loadMoreMessages = async () => {
@@ -546,7 +558,7 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         )}
 
         {/* 메시지 목록 */}
-        <div ref={scrollRef} className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto p-8 space-y-6 custom-scroll">
+        <div ref={scrollRef} className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto px-[5px] py-6 space-y-6 custom-scroll">
           {/* 입장 메시지 (공지 위) */}
           {localEntryMsg && (
             <div className="flex flex-col items-center space-y-1">
@@ -570,7 +582,7 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
               </svg>
             </div>
-            <div className="flex flex-col items-start max-w-[80%]">
+            <div className="flex flex-col items-start max-w-[65%]">
               <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1.5">Mystic Lotto 공지</span>
               <div className="px-5 py-3 rounded-2xl rounded-tl-none bg-white/5 border border-white/5 text-slate-200 text-sm font-medium leading-relaxed space-y-2">
                 <p className="flex"><span className="shrink-0 mr-1.5">•</span><span>전화번호·계좌번호 등 개인정보를 요구받더라도 절대 응하지 마세요. 운영진은 어떠한 경우에도 개인정보를 요청하지 않습니다.</span></p>
@@ -600,14 +612,14 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               </div>
             );
             return (
-              <div key={msg.id} className={`flex items-start space-x-4 w-full min-w-0 ${isMe ? 'flex-row-reverse space-x-reverse' : ''}`}>
+              <div key={msg.id} className={`flex items-start space-x-3 w-full min-w-0 ${isMe ? 'flex-row-reverse space-x-reverse' : ''}`}>
                 {!isMe && (
                   <div className="relative group cursor-pointer shrink-0" onClick={() => setShowGiftModal(msg)}>
                     <OrbVisual level={msg.userLevel} className="w-10 h-10 border border-white/10" />
                     <div className="absolute -top-1 -right-1 bg-indigo-600 text-[8px] font-black px-1.5 py-0.5 rounded shadow-lg">LV.{msg.userLevel}</div>
                   </div>
                 )}
-                <div className={`flex flex-col min-w-0 max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
+                <div className={`flex flex-col min-w-0 max-w-[65%] ${isMe ? 'items-end' : 'items-start'}`}>
                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">{msg.userName}</span>
                   <div className={`px-5 py-3 rounded-2xl text-sm font-medium break-words whitespace-pre-wrap ${isMe ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-white/5 border border-white/5 text-slate-200 rounded-tl-none'}`}>
                     {msg.message}
@@ -683,7 +695,7 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
             {/* 전송 버튼 */}
             <button
-              onClick={sendMessage}
+              onClick={() => sendMessage()}
               className="shrink-0 w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg hover:bg-indigo-500 transition-all active:scale-95"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">

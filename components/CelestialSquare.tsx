@@ -610,7 +610,7 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
 
   return (
     <div className="fixed inset-0 z-[5000] bg-[#020617] text-slate-200 flex flex-col animate-dimension-shift">
-      <header className="relative z-[100] border-b border-white/5 pl-[17px] pr-[27px] sm:px-8 py-6 flex justify-between items-center shrink-0 shadow-2xl">
+      <header className="relative z-[100] border-b border-white/5 pl-[17px] pr-[27px] sm:px-8 py-4 sm:py-4 flex justify-between items-center shrink-0 shadow-2xl">
         <div className="absolute inset-0 bg-white/[0.02] backdrop-blur-3xl -z-10 pointer-events-none" />
         <div className="flex items-center space-x-[14px] sm:space-x-6 min-w-0 flex-1">
           <button
@@ -623,8 +623,8 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           </button>
-          <div className="flex flex-col min-w-0">
-            <h2 className="text-base sm:text-xl font-mystic font-black text-white tracking-tight sm:tracking-widest leading-none uppercase truncate">
+          <div className="flex flex-col min-w-0" style={{ marginTop: 5 }}>
+            <h2 className="text-base sm:text-xl font-mystic font-black text-white tracking-tight sm:tracking-widest leading-tight uppercase truncate">
               {view === 'lounge' ? 'Celestial Square' : view === 'chat' ? `${activeRoom?.icon ? activeRoom.icon + ' ' : ''}${activeRoom?.title}` : 'Resonance Board'}
             </h2>
             {(view === 'post-detail' || view === 'post-edit') ? (
@@ -730,7 +730,7 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
             <div className="max-w-5xl mx-auto space-y-8">
               <div className="flex justify-between items-end border-b border-white/5 pb-6">
                 <div className="space-y-1">
-                   <h3 className="text-lg font-black text-slate-500 uppercase tracking-tight sm:tracking-[0.4em] whitespace-nowrap">Permanent Cosmic Hubs</h3>
+                   <h3 className="text-[16px] sm:text-[17px] font-black text-slate-500 uppercase tracking-tight sm:tracking-[0.4em] whitespace-nowrap">Permanent Cosmic Hubs</h3>
                    <p className="text-[10px] text-indigo-400 italic font-medium">개설된 행성은 소멸 전까지는 유지됩니다.</p>
                 </div>
                 <button onClick={() => setIsCreatingRoom(true)} className="px-5 sm:px-8 py-2.5 sm:py-3.5 bg-indigo-600 text-white font-black rounded-xl sm:rounded-2xl text-[11px] sm:text-[10px] uppercase tracking-tight sm:tracking-widest shadow-xl shadow-indigo-600/20 hover:bg-indigo-500 transition-all active:scale-95 shrink-0">
@@ -792,7 +792,7 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
                         isOfficial ? 'border-amber-400/50 bg-amber-500/5 shadow-[0_0_20px_rgba(251,191,36,0.08)]'
                         : isFav ? 'border-yellow-500/40 bg-yellow-500/5'
                         : isDying ? 'border-rose-500/40 bg-rose-500/5'
-                        : 'border-white/5 hover:border-indigo-500/40'
+                        : 'border-white/20 hover:border-indigo-500/40'
                       }`}
                     >
                       {isOfficial && <div className="absolute -top-2 -right-2 w-20 h-20 bg-amber-400/10 blur-2xl rounded-full pointer-events-none"></div>}
