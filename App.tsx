@@ -48,6 +48,7 @@ const functions = getFunctions(firebaseApp, 'asia-northeast3');
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const isAdmin = ADMIN_UIDS.includes(currentUser?.uid ?? '');
   const [subAdminConfig, setSubAdminConfig] = useState<{ [uid: string]: number }>({});
   const isSubAdmin = !isAdmin && (currentUser?.uid ? currentUser.uid in subAdminConfig : false);
@@ -66,9 +67,6 @@ const App: React.FC = () => {
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [showGoldenCardInfo, setShowGoldenCardInfo] = useState(false);
   const [showGoldenCardConfirm, setShowGoldenCardConfirm] = useState(false);
-  // 로그인 화면 동의 체크박스 (localStorage로 기억)
-  const [loginAgreedTerms, setLoginAgreedTerms] = useState(() => localStorage.getItem('agreedTerms') === 'true');
-  const [loginAgreedPrivacy, setLoginAgreedPrivacy] = useState(() => localStorage.getItem('agreedPrivacy') === 'true');
   // 기존 유저 약관 동의 오버레이 체크박스
   const [overlayAgreedTerms, setOverlayAgreedTerms] = useState(false);
   const [overlayAgreedPrivacy, setOverlayAgreedPrivacy] = useState(false);
@@ -219,8 +217,8 @@ const App: React.FC = () => {
           if (snap.exists()) {
             setTermsAccepted(snap.data().termsVersion === CURRENT_TERMS_VERSION);
           } else {
-            // 신규 유저: 로그인 화면에서 동의 완료
-            setTermsAccepted(true);
+            // 신규 유저: 로그인 후 약관 동의 오버레이에서 처리
+            setTermsAccepted(false);
           }
         });
         const archivesQuery = query(collection(db, "users", user.uid, "archives"), orderBy("timestamp", "desc"));
@@ -328,10 +326,12 @@ const App: React.FC = () => {
           unsubscribeInqReply = onSnapshot(inqReplyQ, snap => setHasInqReply(snap.docs.some(d => !!d.data().adminReply)));
         }
 
+        setAuthLoading(false);
         return () => { unsubscribeUser(); unsubscribeArchives(); unsubscribeInbox(); unsubscribeReports(); unsubscribeInquiries(); unsubscribeRepReply(); unsubscribeInqReply(); };
       } else {
         setCurrentUser(null);
         setProfile(null);
+        setAuthLoading(false);
       }
     });
 
@@ -408,14 +408,6 @@ const App: React.FC = () => {
   const handleGoogleLogin = async () => {
     const user = await loginWithGoogle();
     if (user) {
-      // termsAcceptedAt: 매 동의 시마다 갱신 / termsVersion: 동의한 약관 버전
-      // firstTermsAcceptedAt: 최초 1회만 기록 — 신규 유저(catch)에서만 설정
-      const userDocRef = doc(db, "users", user.uid);
-      const now = Date.now();
-      updateDoc(userDocRef, { termsAcceptedAt: now, termsVersion: CURRENT_TERMS_VERSION }).catch(() =>
-        setDoc(userDocRef, { termsAcceptedAt: now, firstTermsAcceptedAt: now, termsVersion: CURRENT_TERMS_VERSION }, { merge: true })
-      );
-      setTermsAccepted(true);
     }
   };
   const handleWithdrawAction = async () => { if (!currentUser) return; await logout(); setProfile(null); setView('main'); window.location.reload(); };
@@ -680,59 +672,39 @@ const App: React.FC = () => {
     }));
   };
 
+  if (authLoading) return (
+    <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center gap-10">
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_40%,_rgba(99,102,241,0.12),_transparent_70%)] pointer-events-none" />
+      <div className="flex flex-col items-center gap-5 animate-in fade-in zoom-in-95 duration-700">
+        <img src="/s_mlotto_logo.png" alt="Mystic Lotto" className="w-20 h-20 drop-shadow-[0_0_24px_rgba(99,102,241,0.6)]" style={{ animation: 'pulse 2.4s ease-in-out infinite' }} />
+        <div className="text-center space-y-1.5">
+          <h1 className="font-mystic text-[18px] font-black text-white tracking-[0.35em] uppercase">Mystic Lotto</h1>
+          <p className="text-[11px] text-indigo-400 font-bold tracking-[0.25em]">운명의 숫자를 찾아라</p>
+        </div>
+      </div>
+      <div className="w-40 h-[2px] bg-white/5 rounded-full overflow-hidden">
+        <div className="h-full w-1/3 bg-gradient-to-r from-transparent via-indigo-400 to-transparent rounded-full animate-splash-bar" />
+      </div>
+    </div>
+  );
+
   if (!currentUser) {
-    const canLogin = loginAgreedTerms && loginAgreedPrivacy;
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-[#020617]">
-        {showTermsModal && <LegalModal title="이용약관" subtitle="Terms of Service" onClose={() => setShowTermsModal(false)}><TermsContent /></LegalModal>}
-        {showPrivacyModal && <LegalModal title="개인정보처리방침" subtitle="Privacy Policy" onClose={() => setShowPrivacyModal(false)}><PrivacyContent /></LegalModal>}
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_rgba(30,58,138,0.2),_transparent)] pointer-events-none"></div>
         <div className="relative z-10 glass p-10 rounded-[3rem] w-full max-w-lg space-y-8 animate-in fade-in zoom-in duration-700 shadow-2xl border-white/5 text-center">
           <div className="space-y-3">
+            <img src="/s_mlotto_logo.png" alt="logo" className="w-16 h-16 mx-auto drop-shadow-[0_0_20px_rgba(99,102,241,0.5)]" />
             <h1 className="text-5xl font-mystic font-bold text-transparent bg-clip-text bg-gradient-to-b from-indigo-200 via-indigo-400 to-indigo-600 tracking-tighter uppercase">Mystic Lotto</h1>
             <p className="text-slate-500 text-[10px] font-black tracking-[0.6em] uppercase">Fate & Resonance</p>
           </div>
-
-          {/* 약관 동의 */}
-          <div className="bg-white/[0.03] border border-white/10 rounded-2xl p-5 space-y-4 text-left">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">서비스 이용을 위해 아래 항목에 동의해 주세요</p>
-            <label className="flex items-start space-x-3 cursor-pointer group">
-              <div
-                onClick={() => { const v = !loginAgreedTerms; setLoginAgreedTerms(v); localStorage.setItem('agreedTerms', String(v)); }}
-                className={`w-5 h-5 shrink-0 rounded-md border-2 flex items-center justify-center transition-all mt-0.5 ${loginAgreedTerms ? 'bg-indigo-600 border-indigo-500' : 'border-slate-600 group-hover:border-slate-400'}`}
-              >
-                {loginAgreedTerms && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-              </div>
-              <span className="text-xs text-slate-300 leading-relaxed" onClick={() => setLoginAgreedTerms(!loginAgreedTerms)}>
-                (필수) <button type="button" onClick={e => { e.stopPropagation(); setShowTermsModal(true); }} className="text-indigo-400 underline underline-offset-2 hover:text-indigo-300">이용약관</button>에 동의합니다.
-              </span>
-            </label>
-            <label className="flex items-start space-x-3 cursor-pointer group">
-              <div
-                onClick={() => setLoginAgreedPrivacy(!loginAgreedPrivacy)}
-                className={`w-5 h-5 shrink-0 rounded-md border-2 flex items-center justify-center transition-all mt-0.5 ${loginAgreedPrivacy ? 'bg-indigo-600 border-indigo-500' : 'border-slate-600 group-hover:border-slate-400'}`}
-              >
-                {loginAgreedPrivacy && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-              </div>
-              <span className="text-xs text-slate-300 leading-relaxed" onClick={() => setLoginAgreedPrivacy(!loginAgreedPrivacy)}>
-                (필수) <button type="button" onClick={e => { e.stopPropagation(); setShowPrivacyModal(true); }} className="text-indigo-400 underline underline-offset-2 hover:text-indigo-300">개인정보처리방침</button>에 동의합니다.
-              </span>
-            </label>
-            <p className="text-[10px] text-slate-600 text-center pt-1">본 서비스는 만 19세 이상 성인만 이용할 수 있습니다.</p>
-          </div>
-
-          {/* 로그인 버튼 */}
-          <div className="space-y-3">
-            <button
-              onClick={handleGoogleLogin}
-              disabled={!canLogin}
-              className={`w-full py-4 font-black rounded-2xl shadow-xl flex items-center justify-center space-x-3 transition-all active:scale-95 ${canLogin ? 'bg-white text-slate-950 hover:bg-slate-100' : 'bg-white/20 text-slate-500 cursor-not-allowed'}`}
-            >
-              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className={`w-5 h-5 ${!canLogin && 'opacity-40'}`} alt="google" />
-              <span>Google 계정으로 시작</span>
-            </button>
-            {!canLogin && <p className="text-[10px] text-slate-600 text-center">약관에 동의하셔야 시작할 수 있습니다.</p>}
-          </div>
+          <button
+            onClick={handleGoogleLogin}
+            className="w-full py-4 font-black rounded-2xl shadow-xl flex items-center justify-center space-x-3 transition-all active:scale-95 bg-white text-slate-950 hover:bg-slate-100"
+          >
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="google" />
+            <span>Google 계정으로 시작</span>
+          </button>
         </div>
       </div>
     );
@@ -950,23 +922,23 @@ const App: React.FC = () => {
       )}
       <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
       <div className="border-b border-white/5 pl-[17px] pr-[22px] py-4 flex justify-between items-center">
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center gap-[11px] sm:gap-4">
           <img src="/s_mlotto_logo.png" alt="Mystic" className="w-10 h-10 object-contain drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
-          <div className="flex flex-col mt-[3px] sm:mt-0"><h2 className="text-lg sm:text-2xl font-mystic font-black text-white tracking-wider leading-none">MYSTIC LOTTO</h2><span className="text-[8px] text-indigo-400 uppercase font-bold tracking-[0.42em] sm:tracking-[0.5em] mt-1 whitespace-nowrap">Lotto Resonance</span></div>
+          <div className="flex flex-col mt-[3px] sm:mt-0"><h2 className="text-[17px] sm:text-2xl font-mystic font-black text-white tracking-wide sm:tracking-wider leading-none">MYSTIC LOTTO</h2><span className="text-[8px] text-indigo-400 uppercase font-bold tracking-[0.42em] sm:tracking-[0.5em] mt-1 whitespace-nowrap">Lotto Resonance</span></div>
         </div>
         <div className="flex items-center space-x-6 text-right relative translate-x-[10px] sm:translate-x-0">
           <button onClick={() => setView('profile')} className="hover:bg-white/5 p-2 rounded-xl group flex items-center space-x-4">
              <div className="hidden sm:block text-right relative">
                <p className="text-[10px] text-slate-500 uppercase font-black">Fortune Seeker</p>
-               <p className="text-base font-black text-white group-hover:text-indigo-400 transition-colors inline-flex items-center gap-1.5">
+               <p className="text-base font-black text-white group-hover:text-indigo-400 transition-colors">
                  {orb.nickname || profile.name}님
-                 {(orb.mailbox?.some(m => !m.isRead) || (isAdmin && hasNewReports)) && (
-                   <span className="inline-block w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
-                 )}
                </p>
              </div>
-             <span className="translate-x-[7px] sm:translate-x-0">
+             <span className="translate-x-[10px] sm:translate-x-0 relative">
                <OrbVisual level={orb.level} className="w-8 h-8 border border-white/10 group-hover:border-indigo-500/50 transition-all" overlayAnimation={getActiveDecoration(orb).overlayAnimation} />
+               {(orb.mailbox?.some(m => !m.isRead) || (isAdmin && (hasNewReports || hasNewInquiries)) || (!isAdmin && (hasRepReply || hasInqReply))) && (
+                 <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+               )}
              </span>
           </button>
           <div className="relative">

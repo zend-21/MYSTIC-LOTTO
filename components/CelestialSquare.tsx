@@ -468,7 +468,7 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
         reportReason,
       });
       // 방 문서에 삭제 방지 플래그 설정 (소멸 로직이 건너뜀)
-      await updateDoc(doc(db, 'square', 'rooms', 'list', activeRoom.id), { isUnderReview: true });
+      try { await updateDoc(doc(db, 'square', 'rooms', 'list', activeRoom.id), { isUnderReview: true }); } catch {}
       setShowReportModal(false);
       setReportReason('');
       onToast('신고가 접수되었습니다. 검토 후 조치하겠습니다.');
@@ -610,7 +610,7 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
 
   return (
     <div className="fixed inset-0 z-[5000] bg-[#020617] text-slate-200 flex flex-col animate-dimension-shift">
-      <header className="relative z-[100] border-b border-white/5 pl-[17px] pr-[27px] sm:px-8 py-4 sm:py-4 flex justify-between items-center shrink-0 shadow-2xl">
+      <header className="relative z-[100] border-b border-white/5 pl-[12px] pr-[27px] sm:px-8 py-4 sm:py-4 flex justify-between items-center shrink-0 shadow-2xl">
         <div className="absolute inset-0 bg-white/[0.02] backdrop-blur-3xl -z-10 pointer-events-none" />
         <div className="flex items-center space-x-[14px] sm:space-x-6 min-w-0 flex-1">
           <button
@@ -660,7 +660,6 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
                     <div className="fixed inset-0 bg-transparent z-[150]" onClick={() => setShowRoomMenu(false)}></div>
                     <div className="absolute top-full right-0 mt-3 w-52 bg-slate-900 border border-indigo-500/30 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] z-[200] p-2 animate-in fade-in zoom-in-95 duration-200">
                        <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest px-4 py-2 border-b border-white/5 mb-1">Planet Control</p>
-                       <button onClick={() => { onToast("알림 설정이 변경되었습니다."); setShowRoomMenu(false); }} className="w-full text-left p-3 rounded-xl hover:bg-white/5 text-[10px] font-bold text-slate-300 transition-colors flex items-center space-x-2"><span>🛎️</span><span>알림 끄기</span></button>
                        <button onClick={() => { setShowParticipantsModal(true); setShowRoomMenu(false); }} className="w-full text-left p-3 rounded-xl hover:bg-white/5 text-[10px] font-bold text-slate-300 transition-colors flex items-center space-x-2"><span>👥</span><span>참여자 목록</span></button>
                        <button onClick={handleSaveCapture} className="w-full text-left p-3 rounded-xl hover:bg-white/5 text-[10px] font-bold text-slate-300 transition-colors flex items-center space-x-2"><span>🗂️</span><span>대화내용 저장</span></button>
                        <button onClick={() => { setShowRoomMenu(false); setShowReportModal(true); }} className="w-full text-left p-3 rounded-xl hover:bg-rose-900/30 text-[10px] font-bold text-rose-400/80 hover:text-rose-300 transition-colors flex items-center space-x-2"><span>🚨</span><span>대화내용 신고하기</span></button>
@@ -696,8 +695,13 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
                 )}
              </div>
            )}
-           <button onClick={() => onOpenSelfProfile?.()} className="rounded-full hover:ring-2 hover:ring-indigo-400/60 transition-all">
-             <OrbVisual level={orb.level} className="w-10 h-10 border border-white/10" overlayAnimation={(ORB_DECORATIONS.find(d => d.id === orb.activeDecorationId) || ORB_DECORATIONS[0]).overlayAnimation} />
+           <button onClick={() => onOpenSelfProfile?.()} className="flex items-center space-x-3 transition-all" style={{ marginRight: window.innerWidth < 640 ? -10 : 0 }}>
+             {view !== 'chat' && (
+               <div className="sm:hidden text-right self-end pb-0.5">
+                 <p className="text-xs font-normal text-white/80">LV.{Math.floor(orb.level)}</p>
+               </div>
+             )}
+             <OrbVisual level={orb.level} className="w-10 h-10 border border-white/10 shadow-lg shadow-indigo-500/10" overlayAnimation={(ORB_DECORATIONS.find(d => d.id === orb.activeDecorationId) || ORB_DECORATIONS[0]).overlayAnimation} />
            </button>
         </div>
       </header>
@@ -788,11 +792,11 @@ const CelestialSquare: React.FC<CelestialSquareProps> = ({ profile, orb, onUpdat
                     <div
                       key={room.id}
                       onClick={() => { setActiveRoom(room); setView('chat'); }}
-                      className={`glass p-4 rounded-2xl text-left group transition-all duration-500 relative overflow-hidden flex flex-col justify-between h-44 border cursor-pointer ${
-                        isOfficial ? 'border-amber-400/50 bg-amber-500/5 shadow-[0_0_20px_rgba(251,191,36,0.08)]'
-                        : isFav ? 'border-yellow-500/40 bg-yellow-500/5'
-                        : isDying ? 'border-rose-500/40 bg-rose-500/5'
-                        : 'border-white/20 hover:border-indigo-500/40'
+                      className={`glass p-4 rounded-2xl text-left group transition-all duration-500 relative overflow-hidden flex flex-col justify-between h-44 border sm:border-[0.5px] cursor-pointer shadow-[0_0_28px_rgba(99,102,241,0.18)] ${
+                        isOfficial ? 'border-white/10 hover:border-indigo-500/30'
+                        : isFav ? 'border-yellow-500/25 bg-yellow-500/5'
+                        : isDying ? 'border-rose-500/25 bg-rose-500/5'
+                        : 'border-white/10 hover:border-indigo-500/30'
                       }`}
                     >
                       {isOfficial && <div className="absolute -top-2 -right-2 w-20 h-20 bg-amber-400/10 blur-2xl rounded-full pointer-events-none"></div>}

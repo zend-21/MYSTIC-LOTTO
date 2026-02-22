@@ -94,9 +94,9 @@ service cloud.firestore {
         // ① 관리자 또는 방 개설자: 모든 필드 수정 가능
         (resource.data.creatorId == request.auth.uid || isAdmin())
         ||
-        // ② 일반 유저: participantCount, lastEnteredAt 두 필드만 수정 가능
-        //    (입퇴장 카운팅 및 방문 시각 갱신 목적)
-        onlyChanges(['participantCount', 'lastEnteredAt'])
+        // ② 일반 유저: participantCount, lastEnteredAt, isUnderReview 수정 가능
+        //    (입퇴장 카운팅, 방문 시각 갱신, 신고 시 삭제 방지 플래그)
+        onlyChanges(['participantCount', 'lastEnteredAt', 'isUnderReview'])
       );
 
       // ── 채팅 메시지 ──────────────────────────────────────────────

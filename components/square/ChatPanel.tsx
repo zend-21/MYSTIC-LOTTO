@@ -4,9 +4,9 @@ import { OrbVisual } from '../FortuneOrb';
 import { db, auth } from '../../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
-  collection, query, onSnapshot, addDoc,
+  collection, query, onSnapshot, addDoc, where,
   orderBy, limit, getDocs, startAfter, QueryDocumentSnapshot,
-  doc, updateDoc, arrayUnion, setDoc, getDoc
+  doc, updateDoc, arrayUnion, setDoc, getDoc, serverTimestamp, Timestamp
 } from 'firebase/firestore';
 import { spendPoints } from '../../services/geminiService';
 import Picker from '@emoji-mart/react';
@@ -132,7 +132,6 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
   // ── refs ─────────────────────────────────────────────────────────────────
   const scrollRef              = useRef<HTMLDivElement>(null);
-  const sessionStartRef        = useRef<number>(Date.now());
   // auto trigger refs (latest value via sync effects)
   const autoMacrosRef          = useRef(autoMacros);
   const mutedUntilRef          = useRef(mutedUntil);
@@ -159,8 +158,8 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
   };
 
   const myUid = auth.currentUser?.uid;
+  // 서버 쿼리(where timestamp > joinedAt)가 이미 필터링 → 클라이언트 타임스탬프 비교 없음
   const sessionMsgs = realtimeMsgs
-    .filter(m => m.timestamp >= sessionStartRef.current)
     .filter(m => !(m.excludeUserId && m.excludeUserId === myUid));
 
   const allMessages: ChatMessage[] = [
@@ -196,7 +195,7 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           userName:  currentDisplayNameRef.current,
           userLevel: orbLevelRef.current,
           message:   text,
-          timestamp: now,
+          timestamp: serverTimestamp(),
         }
       );
       lastMyMsgTimeRef.current = now;
@@ -219,8 +218,7 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
   // ── 방 변경: 초기화 + 메시지 구독 + i_enter 트리거 ──────────────────────
   useEffect(() => {
-    const entryTs = Date.now();
-    sessionStartRef.current = entryTs;
+    setRealtimeMsgs([]);
     setHistoricalMsgs([]);
     setMsgCursor(null);
     setShowEmojiPicker(false);
@@ -237,65 +235,94 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       userName: 'system',
       userLevel: 0,
       message: `${roomLabel}${titleSuffix}에 입장하였습니다.`,
-      timestamp: entryTs,
+      timestamp: Date.now(),
     });
 
     resetIdleTimer();
 
-    // ② 다른 사용자에게 보이는 시스템 입장 메시지 — auth 있을 때만 (원래 방식 유지)
-    if (auth.currentUser) {
+    const roomIdSnapshot = activeRoom.id;
+    let enterTimer: ReturnType<typeof setTimeout> | null = null;
+    let unsubSnapshot: () => void = () => {};
+    let authHandled = false;
+    let cancelled = false;
+
+    // ② auth 준비 후: 입장 메시지 전송 → 서버 타임스탬프 획득 → 메시지 구독
+    const unsubAuth = onAuthStateChanged(auth, async user => {
+      if (!user || authHandled || cancelled) return;
+      authHandled = true;
+
+      const messagesRef = collection(db, 'square', 'rooms', 'list', activeRoom.id, 'messages');
       const displayName = currentDisplayNameRef.current || '익명';
-      addDoc(
-        collection(db, 'square', 'rooms', 'list', activeRoom.id, 'messages'),
-        {
+
+      // ── 입장 메시지 전송 + 서버 타임스탬프 획득 (messages 컬렉션 = 규칙 허용됨) ──
+      let joinedAt: Timestamp = Timestamp.now(); // fallback
+      try {
+        const entryRef = await addDoc(messagesRef, {
           userId: 'system',
           userName: 'system',
           userLevel: 0,
           message: `${displayName}님이 입장하였습니다.`,
-          timestamp: entryTs + 1,
-          excludeUserId: auth.currentUser.uid,
-        }
-      ).catch(() => {});
-    }
-
-    let enterTimer: ReturnType<typeof setTimeout> | null = null;
-    let unsubSnapshot: () => void = () => {};
-    let authHandled = false;
-
-    // ③ auth 준비 후 실행: 메시지 구독 + 자동매크로
-    // 모바일에서 IndexedDB 복원이 늦어도 auth가 오면 즉시 처리
-    const unsubAuth = onAuthStateChanged(auth, user => {
-      if (!user || authHandled) return;
-      authHandled = true;
+          timestamp: serverTimestamp(),
+          excludeUserId: user.uid,
+        });
+        if (cancelled) return;
+        const entrySnap = await getDoc(entryRef);
+        if (cancelled) return;
+        joinedAt = entrySnap.data()?.timestamp ?? Timestamp.now();
+      } catch {
+        if (cancelled) return;
+      }
 
       // i_enter 자동 매크로 (1.5초 후)
       enterTimer = setTimeout(() => sendAutoMacro('i_enter'), 1500);
 
-      // 메시지 실시간 구독
+      // ── 메시지 구독: joinedAt 이후만 (서버가 필터링, 기기 시계 무관) ──
       const q = query(
-        collection(db, 'square', 'rooms', 'list', activeRoom.id, 'messages'),
-        orderBy('timestamp', 'desc'),
-        limit(MSG_PAGE_SIZE)
+        messagesRef,
+        where('timestamp', '>=', joinedAt),
+        orderBy('timestamp', 'asc')
       );
       unsubSnapshot = onSnapshot(q, snap => {
-        const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage)).reverse();
+        const msgs = snap.docs.map(d => {
+          const data = d.data();
+          const ts = data.timestamp instanceof Timestamp
+            ? data.timestamp.toMillis()
+            : (typeof data.timestamp === 'number' ? data.timestamp : Date.now());
+          return { id: d.id, ...data, timestamp: ts } as ChatMessage;
+        });
         setRealtimeMsgs(msgs);
-        setMsgCursor(snap.docs[snap.docs.length - 1] || null);
-        setHasMoreMessages(snap.docs.length === MSG_PAGE_SIZE);
       }, err => console.error('메시지 구독 오류:', err));
     });
 
     return () => {
+      cancelled = true;
       unsubAuth();
       if (enterTimer) clearTimeout(enterTimer);
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
       unsubSnapshot();
+      // 퇴장 메시지: 본인이 직접 전송 (중복 방지)
+      if (auth.currentUser) {
+        const name = currentDisplayNameRef.current || '익명';
+        addDoc(
+          collection(db, 'square', 'rooms', 'list', roomIdSnapshot, 'messages'),
+          {
+            userId: 'system',
+            userName: 'system',
+            userLevel: 0,
+            message: `${name}님이 퇴장하였습니다.`,
+            timestamp: serverTimestamp(),
+            excludeUserId: auth.currentUser.uid,
+          }
+        ).catch(() => {});
+      }
     };
   }, [activeRoom.id, sendAutoMacro, resetIdleTimer]);
 
   // ── 새 메시지 → 하단 스크롤 ─────────────────────────────────────────────
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    requestAnimationFrame(() => {
+      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    });
   }, [realtimeMsgs, activeRoom]);
 
   // ── participants 변화 감지 ────────────────────────────────────────────────
@@ -309,7 +336,10 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const prev  = prevParticipantsRef.current;
     const myUid = auth.currentUser?.uid;
     const entered = participants.filter(p => !prev.some(pp => pp.uid === p.uid) && p.uid !== myUid);
+    const left    = prev.filter(p => !participants.some(pp => pp.uid === p.uid) && p.uid !== myUid);
     if (entered.length > 0) sendAutoMacro('someone_enters', entered[0].name);
+    // 퇴장 메시지는 퇴장자 본인 cleanup에서 전송 → 여기서는 매크로만 발동
+    if (left.length > 0) sendAutoMacro('someone_leaves', left[0].name);
     prevParticipantsRef.current = [...participants];
   }, [participants, sendAutoMacro]);
 
@@ -428,7 +458,7 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         userUniqueTag: orb.uniqueTag || '',
         userLevel: orb.level,
         message: text,
-        timestamp: now,
+        timestamp: serverTimestamp(),
       });
       if (textOverride === undefined) setInputMsg('');
       lastMyMsgTimeRef.current = now;
@@ -457,6 +487,11 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     if (isSending) return;
     const amount = parseInt(giftAmount);
     if (!showGiftModal || showGiftModal.userId === 'system' || !auth.currentUser) return;
+    if (orb.level < 200 && showGiftModal.userLevel >= 200) {
+      onToast('관리자에게는 루멘을 선물할 수 없습니다.');
+      setShowGiftModal(null);
+      return;
+    }
     const target = showGiftModal;
     setIsSending(true);
     setShowGiftModal(null);
@@ -464,12 +499,12 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     try {
       await spendPoints(amount, 'gift_lumen');
       await addDoc(collection(db, 'users', target.userId, 'inbox'), {
-        amount, fromName: currentDisplayName, fromUid: auth.currentUser.uid, timestamp: Date.now()
+        amount, fromName: currentDisplayName, fromUid: auth.currentUser.uid, timestamp: serverTimestamp()
       });
       await addDoc(collection(db, 'square', 'rooms', 'list', activeRoom.id, 'messages'), {
         userId: 'system', userName: 'SYSTEM', userLevel: 0,
         message: `${currentDisplayName}님이 ${target.userName}님에게 ${amount.toLocaleString()} 루멘을 선물했습니다! ✨`,
-        timestamp: Date.now()
+        timestamp: serverTimestamp()
       });
       await updateDoc(doc(db, 'users', auth.currentUser.uid), {
         'orb.giftHistory': arrayUnion({
@@ -614,7 +649,13 @@ const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             return (
               <div key={msg.id} className={`flex items-start space-x-3 w-full min-w-0 ${isMe ? 'flex-row-reverse space-x-reverse' : ''}`}>
                 {!isMe && (
-                  <div className="relative group cursor-pointer shrink-0" onClick={() => setShowGiftModal(msg)}>
+                  <div className="relative group cursor-pointer shrink-0" onClick={() => {
+                    if (orb.level < 200 && msg.userLevel >= 200) {
+                      onToast('관리자에게는 루멘을 선물할 수 없습니다.');
+                      return;
+                    }
+                    setShowGiftModal(msg);
+                  }}>
                     <OrbVisual level={msg.userLevel} className="w-10 h-10 border border-white/10" />
                     <div className="absolute -top-1 -right-1 bg-indigo-600 text-[8px] font-black px-1.5 py-0.5 rounded shadow-lg">LV.{msg.userLevel}</div>
                   </div>

@@ -135,6 +135,7 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
   const longPressActivatedRef = useRef(false);
   const [reports, setReports] = useState<Report[]>([]);
   const [expandedReport, setExpandedReport] = useState<string | null>(null);
+  const [deleteReportId, setDeleteReportId] = useState<string | null>(null);
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
 
@@ -393,7 +394,7 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
     const pad = (n: number) => String(n).padStart(2, '0');
     const dt = new Date(cap.savedAt);
     const dateStr = `${dt.getFullYear()}.${pad(dt.getMonth()+1)}.${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
-    const participants = cap.participants.map(p => `${p.name}${p.uniqueTag ? ` @${p.uniqueTag}` : ''}`).join(', ');
+    const participants = cap.participants.map(p => `${p.name}${p.uniqueTag ? ` ${p.uniqueTag.startsWith('@') ? '' : '@'}${p.uniqueTag}` : ''}`).join(', ');
     const sep = '─'.repeat(36);
     const lines = [
       `[나눔방 갈무리]`,
@@ -644,6 +645,26 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
       {showPrivacyModal && <LegalModal title="개인정보처리방침" subtitle="Privacy Policy" onClose={() => setShowPrivacyModal(false)}><PrivacyContent /></LegalModal>}
 
       {/* 서고 기록 삭제 확인 모달 */}
+      {/* 신고 삭제 확인 모달 */}
+      {deleteReportId && (
+        <div className="fixed inset-0 z-[9500] flex items-center justify-center px-6" onClick={() => setDeleteReportId(null)}>
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" />
+          <div className="relative glass p-10 rounded-[3rem] border border-rose-500/30 w-full max-w-sm space-y-8 shadow-[0_0_80px_rgba(239,68,68,0.15)]" onClick={e => e.stopPropagation()}>
+            <div className="text-center space-y-3">
+              <div className="w-14 h-14 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mx-auto">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgb(239,68,68)" strokeWidth="2.5"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+              </div>
+              <h3 className="text-lg font-black text-white tracking-wider">신고 삭제</h3>
+              <p className="text-sm text-slate-400 leading-relaxed">이 신고 내역을 삭제합니다.<br/><span className="text-rose-400 font-bold">삭제된 신고는 복구할 수 없습니다.</span></p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteReportId(null)} className="flex-1 py-4 bg-white/5 border border-white/10 rounded-2xl text-slate-300 font-black text-sm hover:bg-white/10 transition-all">취소</button>
+              <button onClick={() => { deleteDoc(doc(db, 'reports', deleteReportId)).then(() => { setReports(prev => prev.filter(r => r.id !== deleteReportId)); setExpandedReport(null); }).catch(() => onToast('삭제에 실패했습니다.')); setDeleteReportId(null); }} className="flex-1 py-4 bg-rose-600/80 border border-rose-500/50 rounded-2xl text-white font-black text-sm hover:bg-rose-500 transition-all">삭제</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {confirmDeleteArchiveId && (
         <div className="fixed inset-0 z-[9500] flex items-center justify-center px-6" onClick={() => setConfirmDeleteArchiveId(null)}>
           <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" />
@@ -767,32 +788,26 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
         </div>
       )}
 
-      <header className="relative z-10 border-b border-white/5 px-8 py-6 flex justify-between items-center shrink-0">
+      <header className="relative z-10 border-b border-white/5 pl-[12px] pr-[27px] sm:px-8 py-4 sm:py-4 flex justify-between items-center shrink-0">
         <div className="absolute inset-0 bg-white/[0.02] backdrop-blur-3xl -z-10 pointer-events-none" />
-        <div className="flex items-center space-x-3 sm:space-x-6">
+        <div className="flex items-center space-x-[14px] sm:space-x-6 min-w-0 flex-1">
           <button onClick={onBack} className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors shrink-0">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           </button>
-          <div>
-            <h2 className="text-base sm:text-xl font-mystic font-black text-white tracking-widest leading-none uppercase">Private Sanctum</h2>
-            <p className="text-[9px] text-indigo-400 font-black uppercase tracking-[0.4em] mt-0.5 sm:mt-1.5 inline-flex items-center gap-1.5">
+          <div className="flex flex-col min-w-0" style={{ marginTop: 5 }}>
+            <h2 className="text-base sm:text-xl font-mystic font-black text-white tracking-tight sm:tracking-widest leading-tight uppercase truncate">Private Sanctum</h2>
+            <p className="text-[9px] text-indigo-400 font-black uppercase tracking-[0.4em] mt-1.5 inline-flex items-center gap-1.5">
               {orb.nickname || profile.name} 님의 전용 영역
-              {(orb.mailbox?.some((m: MailMessage) => !m.isRead) || hasReplyNotif || (isAdmin && (hasNewReports || hasNewInquiries))) && (
-                <span className="inline-block w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
-              )}
             </p>
           </div>
         </div>
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-3" style={{ marginRight: -10 }}>
            <div className="text-right sm:self-auto self-end pb-0.5">
               <p className="hidden sm:block text-[9px] text-slate-500 font-black uppercase">Resonance Level</p>
               <p className="text-xs font-normal sm:text-sm sm:font-mystic sm:font-black text-white/80 sm:text-white">LV.{orb.level}</p>
            </div>
            <div className="relative">
              <OrbVisual level={orb.level} className="w-10 h-10 border border-white/10 shadow-lg shadow-indigo-500/10" overlayAnimation={(ORB_DECORATIONS.find(d => d.id === orb.activeDecorationId) || ORB_DECORATIONS[0]).overlayAnimation} />
-             {(orb.mailbox?.some((m: MailMessage) => !m.isRead) || hasReplyNotif || (isAdmin && (hasNewReports || hasNewInquiries))) && (
-               <span className="absolute top-0 right-0 w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-             )}
            </div>
         </div>
       </header>
@@ -1679,18 +1694,44 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                                            <div className="flex flex-wrap gap-2">
                                              {rpt.participants.map(p => (
                                                <span key={p.uid} className="text-[10px] font-bold text-slate-400 bg-white/5 px-2 py-1 rounded-lg">
-                                                 {p.name}{p.uniqueTag ? ` (@${p.uniqueTag})` : ''}
+                                                 {p.name}{p.uniqueTag ? ` (${p.uniqueTag.startsWith('@') ? '' : '@'}${p.uniqueTag})` : ''}
                                                </span>
                                              ))}
                                            </div>
                                          </div>
-                                         <div className="max-h-60 overflow-y-auto custom-scroll p-4 space-y-2">
-                                           {rpt.messages.map((m, i) => (
-                                             <div key={i} className={`text-xs ${m.userId === 'system' ? 'text-center text-indigo-400/60 italic' : ''}`}>
-                                               {m.userId !== 'system' && <span className="font-black text-slate-500 mr-2">{m.userName}</span>}
-                                               <span className="text-slate-300">{m.message}</span>
-                                             </div>
-                                           ))}
+                                         <div className="relative">
+                                           <button
+                                             onClick={() => {
+                                               const pad = (n: number) => String(n).padStart(2, '0');
+                                               const fmtTs = (ts: number) => { const d = new Date(ts); return `${d.getFullYear()}.${pad(d.getMonth()+1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
+                                               const lines: string[] = [];
+                                               lines.push(`[신고] ${rpt.roomName} (${rpt.reason})`);
+                                               lines.push(`신고자: ${rpt.reporterName} (${rpt.reporterTag?.startsWith('@') ? '' : '@'}${rpt.reporterTag})`);
+                                               lines.push(`참여자: ${rpt.participants.map(p => `${p.name}${p.uniqueTag ? ` (${p.uniqueTag.startsWith('@') ? '' : '@'}${p.uniqueTag})` : ''}`).join(', ')}`);
+                                               if (rpt.messages.length > 0 && rpt.messages[0].timestamp) lines.push(`입장 시각: ${fmtTs(rpt.messages[0].timestamp)}`);
+                                               lines.push('─'.repeat(30));
+                                               rpt.messages.forEach(m => {
+                                                 const ts = m.timestamp ? fmtTs(m.timestamp) : '';
+                                                 if (m.userId === 'system' || m.userId === 'local_entry') lines.push(`[${ts}] ${m.message}`);
+                                                 else lines.push(`[${ts}] ${m.userName}: ${m.message}`);
+                                               });
+                                               navigator.clipboard.writeText(lines.join('\n')).then(() => onToast('대화내역이 복사되었습니다.')).catch(() => onToast('복사에 실패했습니다.'));
+                                             }}
+                                             className="absolute top-2 right-2 z-10 px-2.5 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[9px] font-black text-slate-400 hover:text-white transition-all"
+                                           >📋 복사</button>
+                                           <div className="max-h-60 overflow-y-auto custom-scroll p-4 space-y-2">
+                                             {rpt.messages.length > 0 && rpt.messages[0].timestamp && (
+                                               <p className="text-center text-[10px] text-slate-600 font-bold mb-2">
+                                                 입장 시각: {(() => { const d = new Date(rpt.messages[0].timestamp); const pad = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}.${pad(d.getMonth()+1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; })()}
+                                               </p>
+                                             )}
+                                             {rpt.messages.map((m, i) => (
+                                               <div key={i} className={`text-xs ${m.userId === 'system' ? 'text-center text-indigo-400/60 italic' : ''}`}>
+                                                 {m.userId !== 'system' && <span className="font-black text-slate-500 mr-2">{m.userName}</span>}
+                                                 <span className="text-slate-300">{m.message}</span>
+                                               </div>
+                                             ))}
+                                           </div>
                                          </div>
                                        </>
                                      )}
@@ -1703,6 +1744,10 @@ const UserProfilePage: React.FC<UserProfilePageProps> = ({ profile, orb, archive
                                          onClick={() => updateDoc(doc(db, 'reports', rpt.id), { status: 'resolved' }).then(() => setReports(prev => prev.map(r => r.id === rpt.id ? { ...r, status: 'resolved' } : r))).catch(() => {})}
                                          className="flex-1 py-2 bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-[9px] font-black rounded-xl hover:bg-emerald-500/30 transition-all"
                                        >🟢 처리완료</button>
+                                       <button
+                                         onClick={() => setDeleteReportId(rpt.id)}
+                                         className="py-2 px-3 bg-rose-500/20 border border-rose-500/30 text-rose-400 text-[9px] font-black rounded-xl hover:bg-rose-500/30 transition-all shrink-0"
+                                       >🗑️</button>
                                        {rpt.type !== 'direct' && rpt.roomId && (
                                          <button
                                            onClick={() => {

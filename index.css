@@ -46,7 +46,6 @@ body {
 .glass {
   background: rgba(255, 255, 255, 0.02);
   backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 /* FortuneOrb 컴포넌트 내 <style> 태그로도 정의되어 있으나 여기서도 보장 */
@@ -93,6 +92,13 @@ body {
   57% {background-color:rgba(245,158,11,1);opacity:0.2;} 71% {background-color:rgba(244,63,94,1);opacity:0.38;}
   85% {background-color:rgba(20,184,166,1);opacity:0.2;} 100%{background-color:rgba(220,38,38,1);opacity:0.38;}
 }
+
+/* 스플래시 로딩 바 */
+@keyframes splash-bar {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.animate-splash-bar { animation: splash-bar 1.6s ease-in-out infinite; }
 
 /* 안내 표지판 마퀴 (오른쪽→왼쪽) */
 @keyframes notice-marquee {
